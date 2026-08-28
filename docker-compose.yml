@@ -7,18 +7,36 @@ services:
     depends_on:
       - mongo
       - redis
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    env_file: .env
+    environment:
+      BROWSER_PROFILE_DIR: /data/browser
+    volumes:
+      - browser_profiles:/data/browser
+    depends_on:
+      - mongo
+      - redis
+    restart: unless-stopped
 
   mongo:
     image: mongo:7
     volumes:
       - mongo_data:/data/db
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
+    restart: unless-stopped
 
 volumes:
   mongo_data:
   redis_data:
+  browser_profiles:

@@ -1,0 +1,17 @@
+# Playwright's own image so the pinned browser matches the pinned client library.
+# The API image stays slim: only the worker needs a browser, and only for
+# re-minting cookie jars.
+FROM mcr.microsoft.com/playwright/python:v1.62.0-noble
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir --break-system-packages -r requirements.txt playwright==1.62.0
+
+COPY app ./app
+
+# persisted browser profiles live here; see docker-compose volume
+ENV BROWSER_PROFILE_DIR=/data/browser
+RUN mkdir -p /data/browser && useradd -m worker && chown -R worker /app /data
+USER worker
+
+CMD ["arq", "app.worker.WorkerSettings"]
