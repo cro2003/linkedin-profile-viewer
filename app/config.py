@@ -13,6 +13,10 @@ class Account(BaseModel):
     id: str
     cookies: dict[str, str]
     proxy_url: str | None = None
+    # only used to re-login when the persisted browser profile cannot self-heal;
+    # the usual refresh path needs no credentials at all
+    email: str | None = None
+    password: str | None = None
 
     @field_validator("cookies")
     @classmethod
@@ -42,6 +46,9 @@ class Settings(BaseSettings):
     account_min_delay_sec: float = 8
     account_max_delay_sec: float = 20
     proxy_required: bool = False
+    browser_profile_dir: str = "/data/browser"
+    browser_headless: bool = True
+    cookie_refresh_timeout_sec: float = 90
     cache_ttl_hours: int = 24
     negative_cache_ttl_hours: int = 1
     request_timeout_sec: float = 30
