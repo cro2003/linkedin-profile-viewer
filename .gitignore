@@ -18,3 +18,5 @@ NOTES.md
 *.pdf
 research/
 fixtures/raw/
+.playwright-mcp/
+research/cookies.json

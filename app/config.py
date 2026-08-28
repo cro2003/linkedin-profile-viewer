@@ -1,7 +1,8 @@
 import json
+from typing import Annotated
 
 from pydantic import BaseModel, Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Account(BaseModel):
@@ -22,7 +23,7 @@ class Account(BaseModel):
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    api_keys: list[str] = Field(default_factory=list)
+    api_keys: Annotated[list[str], NoDecode] = Field(default_factory=list)
     log_level: str = "INFO"
 
     mongo_url: str = "mongodb://localhost:27017"
