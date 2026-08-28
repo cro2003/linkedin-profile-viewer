@@ -1,0 +1,20 @@
+# secrets
+.env
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# editors
+.idea/
+.vscode/
+.DS_Store
+
+# internal working docs — never ship these
+PLAN.md
+NOTES.md
+*.pdf
+research/
+fixtures/raw/
