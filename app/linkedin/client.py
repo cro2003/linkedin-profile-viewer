@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 
 API_BASE = "https://www.linkedin.com/voyager/api"
 PROFILE_PATH = "/identity/dash/profiles"
+SESSION_PROBE_PATH = "/me"
 PROFILE_DECORATION = "com.linkedin.voyager.dash.deco.identity.profile.FullProfileWithEntities-91"
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -64,10 +65,15 @@ def headers_for(account: Account) -> dict[str, str]:
 
 
 def classify(status: int) -> type[FetchError] | None:
-    """Map an HTTP status onto our retry policy. Pure, so it is unit-testable."""
+    """Map an HTTP status onto our retry policy. Pure, so it is unit-testable.
+
+    403 is deliberately PermanentError here: LinkedIn returns it for a profile that
+    does not exist as well as for a dead session, so `fetch_profile` disambiguates
+    it with a session probe before trusting this mapping.
+    """
     if status == 200:
         return None
-    if status in (401, 403, 999):
+    if status in (401, 999):
         return SessionExpired
     if status == 429 or status >= 500:
         return TransientError
@@ -75,8 +81,9 @@ def classify(status: int) -> type[FetchError] | None:
 
 
 class ProfileClient:
-    def __init__(self, account: Account):
+    def __init__(self, account: Account, transport: httpx.AsyncBaseTransport | None = None):
         self.account = account
+        self._transport = transport  # tests inject a mock transport here
         self._client: httpx.AsyncClient | None = None
         self._proxy_disabled = False
 
@@ -88,7 +95,8 @@ class ProfileClient:
             max_redirects=MAX_REDIRECTS,
             headers=headers_for(self.account),
             cookies=dict(self.account.cookies),
-            proxy=proxy,
+            proxy=None if self._transport else proxy,
+            transport=self._transport,
         )
 
     async def __aenter__(self):
@@ -121,10 +129,24 @@ class ProfileClient:
         except httpx.TimeoutException as e:
             raise TransientError("timeout") from e
 
+    async def session_alive(self) -> bool:
+        """Cheap liveness check, used only to disambiguate a 403."""
+        try:
+            r = await self._client.get(f"{API_BASE}{SESSION_PROBE_PATH}")
+        except Exception:
+            return False
+        return r.status_code == 200
+
     async def fetch_profile(self, public_id: str) -> dict:
         url = (f"{API_BASE}{PROFILE_PATH}?q=memberIdentity"
                f"&memberIdentity={public_id}&decorationId={PROFILE_DECORATION}")
         r = await self._get(url)
+
+        if r.status_code == 403:
+            # ambiguous upstream: no such profile, or our session is gone
+            if await self.session_alive():
+                raise PermanentError(f"profile not found or not visible: {public_id}")
+            raise SessionExpired(f"403 and session probe failed for {public_id}")
 
         error = classify(r.status_code)
         if error is not None:
