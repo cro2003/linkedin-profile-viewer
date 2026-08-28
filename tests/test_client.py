@@ -80,3 +80,47 @@ async def test_transient_statuses_are_retryable():
         with pytest.raises(TransientError) as e:
             await c.fetch_profile("someone")
     assert e.value.retryable is True
+
+
+def _identity_transport(returned_id):
+    payload = {"included": [{
+        "entityUrn": "urn:li:fsd_profile:BBB",
+        "$type": "com.linkedin.voyager.dash.identity.profile.Profile",
+        "publicIdentifier": returned_id,
+        "firstName": "Someone",
+        "lastName": "Else",
+    }]}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+    return httpx.MockTransport(handler)
+
+
+async def test_mismatched_identity_is_refused():
+    """Upstream answers an unresolvable id with a different person; never serve it."""
+    from app.linkedin.client import IdentityMismatch
+
+    async with ProfileClient(ACCOUNT, transport=_identity_transport("cohenjune")) as c:
+        with pytest.raises(IdentityMismatch):
+            await c.fetch_profile("reidhoffman")
+
+
+async def test_identity_comparison_ignores_case():
+    async with ProfileClient(ACCOUNT, transport=_identity_transport("someone")) as c:
+        payload = await c.fetch_profile("SomeOne")
+    assert payload["included"][0]["publicIdentifier"] == "someone"
+
+
+async def test_persisted_jar_keeps_seeded_cookies():
+    """Regression: a domain filter dropped seeded cookies and wiped the session."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=PROFILE_PAYLOAD,
+                              headers={"set-cookie": "__cf_bm=abc; Domain=.linkedin.com; Path=/"})
+
+    async with ProfileClient(ACCOUNT, transport=httpx.MockTransport(handler)) as c:
+        await c.fetch_profile("someone")
+        jar = c.cookies
+
+    assert jar["li_at"] == "x", "seeded session cookie must survive"
+    assert jar["JSESSIONID"] == "ajax:y"
+    assert jar["__cf_bm"] == "abc", "server-set cookie must be captured"

@@ -32,20 +32,33 @@ MAX_REDIRECTS = 3
 class FetchError(Exception):
     retryable = False
     account_dead = False
+    code = "fetch_failed"
 
 
 class TransientError(FetchError):
     retryable = True
+    code = "upstream_unavailable"
 
 
 class PermanentError(FetchError):
-    pass
+    code = "profile_not_found"
+
+
+class IdentityMismatch(PermanentError):
+    """Upstream answered with a different person than the one requested.
+
+    Observed live: an identifier LinkedIn cannot resolve does not 404, it returns
+    some other profile. Serving that would hand the caller the wrong person's data,
+    so it is refused rather than cached.
+    """
+    code = "profile_identity_mismatch"
 
 
 class SessionExpired(FetchError):
     """Cookies no longer work; retry the job on a different account."""
     retryable = True
     account_dead = True
+    code = "session_expired"
 
 
 def headers_for(account: Account) -> dict[str, str]:
@@ -109,8 +122,22 @@ class ProfileClient:
 
     @property
     def cookies(self) -> dict[str, str]:
-        """Current jar, so the pool can persist rotated cookies."""
-        return dict(self._client.cookies) if self._client else dict(self.account.cookies)
+        """Current jar, so the pool can persist rotated cookies.
+
+        Read through the underlying cookiejar rather than dict(): the same name can
+        be set for more than one domain (Cloudflare sets __cf_bm for both
+        .linkedin.com and www.linkedin.com) and httpx's mapping raises on that.
+        """
+        if not self._client:
+            return dict(self.account.cookies)
+        # Overlay onto the jar we started with. Cookies seeded into httpx carry an
+        # empty domain, so filtering on domain alone silently drops every one of
+        # them and leaves only what the server set this request.
+        merged = dict(self.account.cookies)
+        for c in self._client.cookies.jar:
+            if not c.domain or "linkedin.com" in c.domain:
+                merged[c.name] = c.value
+        return merged
 
     async def _get(self, url: str) -> httpx.Response:
         try:
@@ -158,7 +185,14 @@ class ProfileClient:
             # a 200 that is not JSON means we were handed a login/authwall page
             raise SessionExpired("200 but body is not JSON") from e
 
-        if not any(e.get("$type", "").endswith("identity.profile.Profile")
-                   for e in payload.get("included", [])):
+        entity = next((e for e in payload.get("included", [])
+                       if e.get("$type", "").endswith("identity.profile.Profile")
+                       and e.get("publicIdentifier")), None)
+        if entity is None:
             raise PermanentError(f"no profile in payload for {public_id}")
+
+        returned = entity["publicIdentifier"]
+        if returned.casefold() != public_id.casefold():
+            raise IdentityMismatch(
+                f"asked for {public_id!r}, upstream returned {returned!r}")
         return payload
