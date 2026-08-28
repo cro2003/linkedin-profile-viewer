@@ -1,34 +1,42 @@
 import logging
 from contextlib import asynccontextmanager
-from datetime import timezone
+from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from arq import create_pool
+from arq.connections import RedisSettings
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from app import store
+from app import pool, store
 from app.config import settings
 from app.db import mongo, redis
-from app.linkedin.client import FetchError, PermanentError, ProfileClient
-from app.linkedin.parse import ProfileNotInPayload, parse_profile
 from app.models import Meta, Profile, ProfileResponse
 from app.urls import InvalidProfileURL, public_id_from_url
+from app.worker import fetch_profile_job, job_id_for
 
 logging.basicConfig(level=settings.log_level,
                     format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger(__name__)
 
+TERMINAL = ("done", "failed")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.arq = None
     try:
+        app.state.arq = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+        await pool.seed_from_env()
         await store.ensure_indexes()
-    except Exception as e:  # a cold Mongo should not stop the app from booting
-        log.warning("index creation skipped: %s", e)
+    except Exception as e:  # boot even with cold dependencies; /health reports it
+        log.warning("startup partially failed: %s", e)
     yield
+    if app.state.arq:
+        await app.state.arq.close()
 
 
-app = FastAPI(title="LinkedIn Profile API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="LinkedIn Profile API", version="0.2.0", lifespan=lifespan)
 
 
 def error_response(status: int, code: str, message: str, retryable: bool = False):
@@ -39,7 +47,8 @@ def error_response(status: int, code: str, message: str, retryable: bool = False
 
 @app.exception_handler(HTTPException)
 async def http_error(request, exc: HTTPException):
-    detail = exc.detail if isinstance(exc.detail, dict) else {"code": "error", "message": str(exc.detail)}
+    detail = exc.detail if isinstance(exc.detail, dict) else {"code": "error",
+                                                              "message": str(exc.detail)}
     return error_response(exc.status_code, detail.get("code", "error"),
                           detail.get("message", ""), detail.get("retryable", False))
 
@@ -57,12 +66,15 @@ class ProfileRequest(BaseModel):
     refresh: bool = Field(False, description="bypass the cache and refetch")
 
 
+def _utc(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
 def _response_from_doc(doc: dict, cache_hit: bool) -> ProfileResponse:
     return ProfileResponse(
         data=Profile.model_validate(doc["profile"]),
         meta=Meta(
-            fetched_at=doc["fetched_at"].replace(tzinfo=timezone.utc)
-            if doc["fetched_at"].tzinfo is None else doc["fetched_at"],
+            fetched_at=_utc(doc["fetched_at"]),
             cache_hit=cache_hit,
             source=doc.get("source", "api"),
             unavailable_sections=doc.get("unavailable_sections", []),
@@ -71,22 +83,25 @@ def _response_from_doc(doc: dict, cache_hit: bool) -> ProfileResponse:
     )
 
 
-async def _fetch_and_store(public_id: str) -> dict:
-    """Synchronous fetch path. Phase 4 replaces this with an enqueue."""
-    if not settings.linkedin_accounts:
-        raise HTTPException(503, {"code": "no_accounts",
-                                  "message": "no LinkedIn accounts configured",
-                                  "retryable": False})
-    account = settings.linkedin_accounts[0]
-    async with ProfileClient(account) as client:
-        payload = await client.fetch_profile(public_id)
-    profile, unavailable, partial = parse_profile(payload, public_id)
-    return await store.save_profile(profile, payload, unavailable, partial, account.id)
+def _job_view(doc: dict) -> dict:
+    return {
+        "job_id": doc["_id"],
+        "public_id": doc["public_id"],
+        "status": doc["status"],
+        "attempts": doc.get("attempts", 0),
+        "error": doc.get("error"),
+        "created_at": _utc(doc["created_at"]).isoformat(),
+        "updated_at": _utc(doc["updated_at"]).isoformat(),
+        "events": [{"status": e["status"], "at": _utc(e["at"]).isoformat()}
+                   for e in doc.get("events", [])],
+        "result_url": (f"/v1/profiles/{doc['public_id']}"
+                       if doc["status"] == "done" else None),
+    }
 
 
-@app.post("/v1/profiles", response_model=ProfileResponse,
-          dependencies=[Depends(require_api_key)])
-async def create_profile_request(body: ProfileRequest):
+@app.post("/v1/profiles", dependencies=[Depends(require_api_key)])
+async def create_profile_request(body: ProfileRequest, request: Request):
+    """Cache hit returns the profile directly; a miss queues a job and returns 202."""
     try:
         public_id = public_id_from_url(body.url)
     except InvalidProfileURL as e:
@@ -98,22 +113,37 @@ async def create_profile_request(body: ProfileRequest):
             err = cached["error"]
             raise HTTPException(404, {"code": err["code"], "message": err["message"]})
         if cached:
-            return _response_from_doc(cached, cache_hit=True)
+            return _response_from_doc(cached, cache_hit=True).model_dump(mode="json")
 
-    try:
-        doc = await _fetch_and_store(public_id)
-    except (PermanentError, ProfileNotInPayload) as e:
-        await store.save_negative(public_id, "profile_not_found", str(e))
-        raise HTTPException(404, {"code": "profile_not_found", "message": str(e)})
-    except FetchError as e:
-        # transient or session problem: stale cache beats an error
-        stale = await store.get_any(public_id)
-        if stale and stale.get("profile"):
-            log.warning("serving stale profile for %s after %s", public_id, type(e).__name__)
-            return _response_from_doc(stale, cache_hit=True)
-        raise HTTPException(503, {"code": "upstream_unavailable", "message": str(e),
-                                  "retryable": True})
-    return _response_from_doc(doc, cache_hit=False)
+    if not settings.linkedin_accounts:
+        raise HTTPException(503, {"code": "no_accounts",
+                                  "message": "no LinkedIn accounts configured"})
+    if not request.app.state.arq:
+        raise HTTPException(503, {"code": "queue_unavailable",
+                                  "message": "job queue is not reachable", "retryable": True})
+
+    job_id = job_id_for(public_id)
+    await store.create_job(job_id, public_id)
+    # a None return means this job id is already in flight, which is the intent:
+    # duplicate requests for one profile share a single fetch
+    await request.app.state.arq.enqueue_job(
+        "fetch_profile_job", public_id, body.refresh, _job_id=job_id)
+
+    return JSONResponse(status_code=202, content={
+        "job_id": job_id,
+        "public_id": public_id,
+        "status": "queued",
+        "poll_url": f"/v1/jobs/{job_id}",
+        "events_url": f"/v1/jobs/{job_id}/events",
+    })
+
+
+@app.get("/v1/jobs/{job_id:path}", dependencies=[Depends(require_api_key)])
+async def read_job(job_id: str):
+    doc = await store.get_job(job_id)
+    if not doc:
+        raise HTTPException(404, {"code": "job_not_found", "message": f"no job {job_id}"})
+    return _job_view(doc)
 
 
 @app.get("/v1/profiles/{public_id}", response_model=ProfileResponse,
@@ -136,6 +166,9 @@ async def health():
             deps[name] = "ok"
         except Exception as e:
             deps[name] = f"error: {type(e).__name__}"
+    try:
+        accounts = await pool.snapshot()
+    except Exception as e:
+        accounts = [{"error": type(e).__name__}]
     ok = all(v == "ok" for v in deps.values())
-    return {"status": "ok" if ok else "degraded", "deps": deps,
-            "accounts": len(settings.linkedin_accounts)}
+    return {"status": "ok" if ok else "degraded", "deps": deps, "accounts": accounts}

@@ -76,9 +76,11 @@ async def save_negative(public_id: str, code: str, message: str) -> None:
 
 
 async def create_job(job_id: str, public_id: str) -> dict:
+    """Upsert, because job ids are stable per profile so requests coalesce."""
     doc = {"_id": job_id, "public_id": public_id, "status": "queued",
-           "created_at": _now(), "updated_at": _now(), "events": [], "attempts": 0}
-    await jobs.insert_one(doc)
+           "created_at": _now(), "updated_at": _now(),
+           "events": [{"status": "queued", "at": _now()}], "attempts": 0, "error": None}
+    await jobs.replace_one({"_id": job_id}, doc, upsert=True)
     return doc
 
 
