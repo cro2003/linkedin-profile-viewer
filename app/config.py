@@ -4,20 +4,27 @@ from typing import Annotated
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+# Routing cookies are not optional: without them LinkedIn's edge answers every
+# request with a 302 to the identical URL, forever.
+REQUIRED_COOKIES = ("li_at", "JSESSIONID")
+
 
 class Account(BaseModel):
     id: str
-    li_at: str
-    jsessionid: str
+    cookies: dict[str, str]
     proxy_url: str | None = None
+
+    @field_validator("cookies")
+    @classmethod
+    def _require_core(cls, v):
+        missing = [c for c in REQUIRED_COOKIES if not v.get(c)]
+        if missing:
+            raise ValueError(f"account cookies missing {missing}")
+        return v
 
     @property
     def csrf_token(self) -> str:
-        return self.jsessionid.strip('"')
-
-    @property
-    def cookie_header(self) -> str:
-        return f'li_at={self.li_at}; JSESSIONID="{self.csrf_token}"'
+        return self.cookies["JSESSIONID"].strip('"')
 
 
 class Settings(BaseSettings):
@@ -37,6 +44,7 @@ class Settings(BaseSettings):
     proxy_required: bool = False
     cache_ttl_hours: int = 24
     negative_cache_ttl_hours: int = 1
+    request_timeout_sec: float = 30
 
     @field_validator("api_keys", mode="before")
     @classmethod
