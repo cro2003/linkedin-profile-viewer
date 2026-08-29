@@ -18,7 +18,19 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from app import accounts, api_admin, api_auth, auth, metrics, pool, ratelimit, runtime, store, web
+from app import (
+    accounts,
+    api_admin,
+    api_auth,
+    auth,
+    media,
+    metrics,
+    pool,
+    ratelimit,
+    runtime,
+    store,
+    web,
+)
 from app.config import settings
 from app.db import mongo, redis
 from app.models import Meta, Profile, ProfileResponse
@@ -54,6 +66,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Sourcely API", version="0.3.0", lifespan=lifespan)
 app.include_router(api_auth.router)
 app.include_router(api_admin.router)
+app.include_router(media.router)
 app.include_router(web.router)
 
 
@@ -227,7 +240,7 @@ async def create_profile_request(
         existing = await store.get_job(job_id)
         status = existing["status"] if existing else "in_progress"
     else:
-        await store.create_job(job_id, public_id)
+        await store.start_job(job_id, public_id)
         await metrics.incr("jobs_queued")
         status = "queued"
 

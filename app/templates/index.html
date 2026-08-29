@@ -37,6 +37,21 @@
 </div>
 
 <div id="error" class="hidden mt-4 rounded-xl border border-red-900/60 bg-red-950/40 p-4 text-sm"></div>
+
+<div id="blocked-note" class="hidden mt-4 rounded-xl border border-amber-900/60 bg-amber-950/30 p-4 text-sm">
+  <div class="flex items-start justify-between gap-4">
+    <div class="text-amber-200/90">
+      <strong class="font-medium">Images aren't loading.</strong>
+      Photos and company logos are served from LinkedIn's CDN
+      (<code class="text-amber-100">media.licdn.com</code>), which ad and tracker blockers
+      block by default. Their URLs are also signed and expire, so an older cached profile
+      can have dead links. The profile data itself is unaffected.
+    </div>
+    <button onclick="document.getElementById('blocked-note').classList.add('hidden')"
+            class="shrink-0 text-xs text-amber-200/70 hover:text-amber-100">dismiss</button>
+  </div>
+</div>
+
 <div id="result" class="hidden mt-4"></div>
 
 <section class="mt-16 grid gap-4 sm:grid-cols-3">
@@ -148,6 +163,15 @@ async function loadQuota() {
   } catch (e) { /* banner is cosmetic */ }
 }
 
+// route CDN images through our own host: blockers filter media.licdn.com by hostname
+const proxied = (url) => '/v1/media?u=' + encodeURIComponent(url);
+
+function imageFailed(img) {
+  img.style.display = 'none';
+  if (img.nextElementSibling) img.nextElementSibling.style.display = 'block';
+  $('blocked-note').classList.remove('hidden');
+}
+
 function showError(html) {
   $('error').innerHTML = html;
   $('error').classList.remove('hidden');
@@ -175,8 +199,12 @@ function renderProfile(payload, freshlyFetched) {
   const d = payload.data, m = payload.meta;
   const exp = (d.experience || []).map(j => `
     <li class="flex gap-3 py-2.5 border-b border-slate-800 last:border-0">
-      ${j.company_logo ? `<img src="${j.company_logo}" class="w-9 h-9 rounded object-cover bg-slate-800" alt="">`
-                       : `<div class="w-9 h-9 rounded bg-slate-800"></div>`}
+      ${j.company_logo
+        ? `<img src="${proxied(j.company_logo)}" referrerpolicy="no-referrer" loading="lazy" alt=""
+               class="w-9 h-9 rounded object-cover bg-slate-800"
+               onerror="imageFailed(this)">
+           <div class="w-9 h-9 rounded bg-slate-800" style="display:none"></div>`
+        : `<div class="w-9 h-9 rounded bg-slate-800"></div>`}
       <div class="min-w-0">
         <div class="text-slate-200">${j.title || ''}</div>
         <div class="text-sm text-slate-400">${j.company || ''}${j.is_current ? ' · current' : ''}</div>
@@ -216,8 +244,12 @@ function renderProfile(payload, freshlyFetched) {
   $('result').innerHTML = `
     <div class="card rounded-xl p-5">
       <div class="flex items-start gap-4">
-        ${d.profile_picture ? `<img src="${d.profile_picture}" class="w-16 h-16 rounded-full object-cover bg-slate-800" alt="">`
-                            : `<div class="w-16 h-16 rounded-full bg-slate-800"></div>`}
+        ${d.profile_picture
+          ? `<img src="${proxied(d.profile_picture)}" referrerpolicy="no-referrer" alt=""
+                 class="w-16 h-16 rounded-full object-cover bg-slate-800"
+                 onerror="imageFailed(this)">
+             <div class="w-16 h-16 rounded-full bg-slate-800" style="display:none"></div>`
+          : `<div class="w-16 h-16 rounded-full bg-slate-800"></div>`}
         <div class="min-w-0 flex-1">
           <h2 class="text-xl font-semibold text-slate-100">${d.full_name || d.public_id}</h2>
           <p class="text-slate-300">${d.headline || ''}</p>
@@ -284,6 +316,7 @@ $('lookup').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('go').disabled = true;
   $('error').classList.add('hidden');
+  $('blocked-note').classList.add('hidden');
   $('result').classList.add('hidden');
   $('steps').innerHTML = '';
   $('progress').classList.add('hidden');

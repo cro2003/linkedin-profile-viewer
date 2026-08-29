@@ -83,25 +83,26 @@ async def save_negative(public_id: str, code: str, message: str) -> None:
     )
 
 
-async def create_job(job_id: str, public_id: str) -> dict:
-    """Insert-only upsert: job ids are stable per profile, so a request arriving
-    while an earlier one is still running must not reset its state."""
-    await jobs.update_one(
-        {"_id": job_id},
-        {
-            "$setOnInsert": {
-                "public_id": public_id,
-                "status": "queued",
-                "created_at": _now(),
-                "updated_at": _now(),
-                "events": [{"status": "queued", "at": _now()}],
-                "attempts": 0,
-                "error": None,
-            }
-        },
-        upsert=True,
-    )
-    return await jobs.find_one({"_id": job_id})
+async def start_job(job_id: str, public_id: str) -> dict:
+    """Reset a job for a fresh run.
+
+    Job ids are stable per profile, so a completed run leaves a terminal document
+    behind. Only call this once the queue has accepted the enqueue, which means no
+    run with this id is in flight and the old document is safe to replace — leaving
+    it in place made a refresh report the previous run's "done" immediately.
+    """
+    doc = {
+        "_id": job_id,
+        "public_id": public_id,
+        "status": "queued",
+        "created_at": _now(),
+        "updated_at": _now(),
+        "events": [{"status": "queued", "at": _now()}],
+        "attempts": 0,
+        "error": None,
+    }
+    await jobs.replace_one({"_id": job_id}, doc, upsert=True)
+    return doc
 
 
 async def update_job(job_id: str, status: str, **fields) -> dict | None:
