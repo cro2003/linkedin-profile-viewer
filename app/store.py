@@ -76,19 +76,27 @@ async def save_negative(public_id: str, code: str, message: str) -> None:
 
 
 async def create_job(job_id: str, public_id: str) -> dict:
-    """Upsert, because job ids are stable per profile so requests coalesce."""
-    doc = {"_id": job_id, "public_id": public_id, "status": "queued",
-           "created_at": _now(), "updated_at": _now(),
-           "events": [{"status": "queued", "at": _now()}], "attempts": 0, "error": None}
-    await jobs.replace_one({"_id": job_id}, doc, upsert=True)
-    return doc
+    """Insert-only upsert: job ids are stable per profile, so a request arriving
+    while an earlier one is still running must not reset its state."""
+    await jobs.update_one(
+        {"_id": job_id},
+        {"$setOnInsert": {"public_id": public_id, "status": "queued",
+                          "created_at": _now(), "updated_at": _now(),
+                          "events": [{"status": "queued", "at": _now()}],
+                          "attempts": 0, "error": None}},
+        upsert=True,
+    )
+    return await jobs.find_one({"_id": job_id})
 
 
 async def update_job(job_id: str, status: str, **fields) -> dict | None:
+    """Upsert so a worker that starts before the API's insert still records progress."""
     return await jobs.find_one_and_update(
         {"_id": job_id},
         {"$set": {"status": status, "updated_at": _now(), **fields},
-         "$push": {"events": {"status": status, "at": _now()}}},
+         "$push": {"events": {"status": status, "at": _now()}},
+         "$setOnInsert": {"created_at": _now()}},
+        upsert=True,
         return_document=ReturnDocument.AFTER,
     )
 

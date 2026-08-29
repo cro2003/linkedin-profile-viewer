@@ -22,6 +22,10 @@ from app.db import redis
 log = logging.getLogger(__name__)
 
 LIVE, REFRESHING, DEAD = "live", "refreshing", "dead"
+# a checkpoint (verification code, captcha) cannot be cleared by retrying: the
+# account is out of action until a human signs in again
+NEEDS_LOGIN = "needs_login"
+UNUSABLE = (DEAD, NEEDS_LOGIN)
 
 # lock TTL is a safety net: if a worker dies mid-fetch the account frees itself
 LEASE_TTL_SEC = 120
@@ -83,7 +87,7 @@ async def lease() -> Account | None:
     random.shuffle(candidates)
 
     for configured in candidates:
-        if await get_status(configured.id) == DEAD:
+        if await get_status(configured.id) in UNUSABLE:
             continue
         next_ok = await redis.get(_k(configured.id, "next_ok_at"))
         if next_ok and time.time() < float(next_ok):
@@ -93,7 +97,10 @@ async def lease() -> Account | None:
             continue
 
         cookies = await get_cookies(configured.id) or configured.cookies
-        return Account(id=configured.id, cookies=cookies, proxy_url=configured.proxy_url)
+        # copy the configured account wholesale, swapping in the live jar — listing
+        # fields by hand silently drops anything added later (it dropped the login
+        # credentials, which disabled the whole cookie-refresh fallback)
+        return configured.model_copy(update={"cookies": cookies})
     return None
 
 

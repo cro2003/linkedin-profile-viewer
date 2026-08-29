@@ -98,6 +98,12 @@ async def fetch_profile_job(ctx: dict, public_id: str, force_refresh: bool = Fal
         await publish(job_id, "failed", error={"code": code, "message": str(e)})
         return {"public_id": public_id, "error": code}
 
+    except session.LoginCheckpointRequired as e:
+        # not retryable by definition; surface it so an operator can act
+        await publish(job_id, "failed",
+                      error={"code": "account_needs_login", "message": str(e)})
+        return {"public_id": public_id, "error": "account_needs_login"}
+
     except (TransientError, session.SessionRefreshFailed) as e:
         if attempt >= MAX_TRIES:
             await publish(job_id, "failed",
@@ -134,7 +140,9 @@ class WorkerSettings:
     functions = [fetch_profile_job]
     on_startup = startup
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
-    max_tries = MAX_TRIES
+    # one more than our own guard, so the job's terminal state is always published
+    # by our code rather than arq abandoning it silently
+    max_tries = MAX_TRIES + 1
     job_timeout = 300
     # short: job state lives in Mongo, arq's copy is only needed briefly so that a
     # later request for the same profile can reuse the stable job id

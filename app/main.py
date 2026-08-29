@@ -123,16 +123,23 @@ async def create_profile_request(body: ProfileRequest, request: Request):
                                   "message": "job queue is not reachable", "retryable": True})
 
     job_id = job_id_for(public_id)
-    await store.create_job(job_id, public_id)
-    # a None return means this job id is already in flight, which is the intent:
-    # duplicate requests for one profile share a single fetch
-    await request.app.state.arq.enqueue_job(
+    # Enqueue first. A None return means arq already knows this job id, so a fetch
+    # is in flight (or just finished) and duplicate requests share it — but we must
+    # then report that job's real state rather than claiming a fresh "queued".
+    enqueued = await request.app.state.arq.enqueue_job(
         "fetch_profile_job", public_id, body.refresh, _job_id=job_id)
+
+    if enqueued is None:
+        existing = await store.get_job(job_id)
+        status = existing["status"] if existing else "in_progress"
+    else:
+        await store.create_job(job_id, public_id)
+        status = "queued"
 
     return JSONResponse(status_code=202, content={
         "job_id": job_id,
         "public_id": public_id,
-        "status": "queued",
+        "status": status,
         "poll_url": f"/v1/jobs/{job_id}",
         "events_url": f"/v1/jobs/{job_id}/events",
     })

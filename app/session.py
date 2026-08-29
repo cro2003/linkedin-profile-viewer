@@ -24,6 +24,16 @@ FEED_URL = "https://www.linkedin.com/feed/"
 LOGIN_URL = "https://www.linkedin.com/login"
 LOGGED_OUT_MARKERS = ("/login", "/authwall", "/uas/login", "/checkpoint")
 
+# The sign-in form has no stable ids: LinkedIn renders React-generated ones like
+# «Rsvvriejj35659j6», and ships two copies of the form on the page. Input *types*
+# are stable, so match on those, keep the older id/name variants as fallbacks, and
+# take the visible copy.
+USER_SELECTOR = ("#username:visible, input[name='session_key']:visible, "
+                 "input[type='email']:visible")
+PASS_SELECTOR = ("#password:visible, input[name='session_password']:visible, "
+                 "input[type='password']:visible")
+SUBMIT_SELECTOR = "button[type='submit']:visible"
+
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36")
 
@@ -31,6 +41,11 @@ REFRESH_LOCK_TTL = 180
 
 
 class SessionRefreshFailed(Exception):
+    pass
+
+
+class LoginCheckpointRequired(SessionRefreshFailed):
+    """LinkedIn demanded human verification. Retrying cannot help."""
     pass
 
 
@@ -69,13 +84,39 @@ async def _harvest(account: Account) -> dict[str, str]:
                         f"{account.id}: browser profile is logged out and no credentials configured")
                 log.warning("%s falling back to credential login", account.id)
                 await page.goto(LOGIN_URL, wait_until="domcontentloaded")
-                await page.fill("#username", account.email)
-                await page.fill("#password", account.password)
-                await page.click('button[type="submit"]')
-                await page.wait_for_url(lambda u: not _logged_out(u), timeout=45_000)
+                log.info("%s login page: url=%s title=%r", account.id, page.url,
+                         await page.title())
+                user_field = page.locator(USER_SELECTOR).first
+                try:
+                    await user_field.wait_for(timeout=15_000)
+                except Exception as e:
+                    # report what we were actually served, so this is diagnosable
+                    # from logs alone instead of needing a live reproduction
+                    inputs = await page.evaluate(
+                        "() => [...document.querySelectorAll('input')]"
+                        ".map(i => i.type + ':' + (i.id || i.name || '?'))")
+                    log.error("%s inputs on page: %s", account.id, inputs)
+                    raise SessionRefreshFailed(
+                        f"{account.id}: no sign-in form at {page.url} "
+                        f"(title={await page.title()!r}, inputs={inputs}); likely a bot "
+                        f"check or an unrecognised login variant") from e
+                await user_field.fill(account.email)
+                password_field = page.locator(PASS_SELECTOR).first
+                await password_field.fill(account.password)
+                # submit with Enter rather than hunting for the button: the button
+                # markup is as unstable as the input ids, the form submits on Enter
+                await password_field.press("Enter")
+                # settle on either a signed-in page or a challenge, whichever comes
+                try:
+                    await page.wait_for_url(
+                        lambda u: not _logged_out(u) or "checkpoint" in u, timeout=45_000)
+                except Exception as e:
+                    raise SessionRefreshFailed(
+                        f"{account.id}: login did not complete, still at {page.url}") from e
 
             if "checkpoint" in page.url or "challenge" in page.url:
-                raise SessionRefreshFailed(f"{account.id}: login checkpoint needs a human")
+                raise LoginCheckpointRequired(
+                    f"{account.id}: LinkedIn requires human verification at {page.url}")
 
             cookies = {c["name"]: c["value"]
                        for c in await context.cookies("https://www.linkedin.com")}
@@ -110,6 +151,11 @@ async def refresh(account: Account) -> dict[str, str]:
         await pool.set_status(account.id, pool.LIVE)
         log.info("refreshed cookies for %s", account.id)
         return cookies
+    except LoginCheckpointRequired as e:
+        # park the account: further attempts only add failed logins to its record
+        log.error("%s needs a human sign-in: %s", account.id, e)
+        await pool.set_status(account.id, pool.NEEDS_LOGIN)
+        raise
     except Exception as e:
         # a failed refresh is not automatically fatal; the account gets one more
         # chance on the next job before anything marks it dead
