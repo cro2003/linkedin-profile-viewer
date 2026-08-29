@@ -14,6 +14,7 @@ import asyncio
 import logging
 import time
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from app import accounts, logins, pool
 from app.config import Account, settings
@@ -59,7 +60,26 @@ class LoginCheckpointRequired(SessionRefreshFailed):
 
 
 def _logged_out(url: str) -> bool:
-    return any(marker in url for marker in LOGGED_OUT_MARKERS)
+    return any(marker in urlparse(url).path for marker in LOGGED_OUT_MARKERS)
+
+
+def is_challenge(url: str) -> bool:
+    """True only for a real verification page.
+
+    Matches on the path, never the query string: LinkedIn bounces a refused login
+    to `/login/?errorKey=challenge_global_internal_error`, and matching the whole
+    URL made that look like a challenge, so the code waited for a verification
+    code that was never sent.
+    """
+    path = urlparse(url).path
+    return "checkpoint" in path or "challenge" in path
+
+
+def login_error(url: str) -> str | None:
+    """LinkedIn reports a refused login as ?errorKey=... on the login page."""
+    query = parse_qs(urlparse(url).query)
+    keys = query.get("errorKey") or []
+    return keys[0] if keys else None
 
 
 async def _harvest(account: Account) -> dict[str, str]:
@@ -127,7 +147,7 @@ async def _harvest(account: Account) -> dict[str, str]:
                         f"{account.id}: login did not complete, still at {page.url}"
                     ) from e
 
-            if "checkpoint" in page.url or "challenge" in page.url:
+            if is_challenge(page.url):
                 raise LoginCheckpointRequired(
                     f"{account.id}: LinkedIn requires human verification at {page.url}"
                 )
@@ -194,6 +214,39 @@ async def _submit_login(page, email: str, password: str) -> None:
     await page.wait_for_load_state("domcontentloaded")
 
 
+async def describe_challenge(page, account_id: str) -> dict:
+    """What is this challenge actually asking for?
+
+    Without this the panel can only say "verification code required", which is
+    useless when no code arrives — the challenge may want an email code, an
+    in-app approval, or a captcha instead.
+    """
+    try:
+        title = await page.title()
+        text = await page.evaluate(
+            "() => (document.body.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 400)"
+        )
+        inputs = await page.evaluate(
+            "() => [...document.querySelectorAll('input')]"
+            ".filter(i => i.type !== 'hidden')"
+            ".map(i => i.type + (i.name ? ':' + i.name : ''))"
+        )
+        buttons = await page.evaluate(
+            "() => [...document.querySelectorAll('button')]"
+            ".map(b => (b.textContent || '').trim().slice(0, 30)).filter(Boolean)"
+        )
+        shot = Path(settings.browser_profile_dir) / account_id / "challenge.png"
+        try:
+            await page.screenshot(path=str(shot), full_page=True)
+        except Exception:
+            pass
+        log.info("%s challenge: title=%r inputs=%s buttons=%s", account_id, title, inputs, buttons)
+        log.info("%s challenge text: %s", account_id, text)
+        return {"title": title, "text": text, "inputs": inputs, "buttons": buttons, "url": page.url}
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
 async def _submit_otp(page, code: str) -> None:
     field = page.locator(OTP_SELECTOR).first
     await field.wait_for(timeout=15_000)
@@ -247,14 +300,25 @@ async def login_and_harvest(
                 if not _logged_out(url):
                     break
 
-                if "checkpoint" in url or "challenge" in url:
+                error_key = login_error(url)
+                if error_key:
+                    # a refused login is terminal; no code is coming
+                    challenge = await describe_challenge(page, account_id)
+                    raise SessionRefreshFailed(
+                        f"{account_id}: LinkedIn refused the login ({error_key}). "
+                        f"Page said: {(challenge.get('text') or '')[:120]}"
+                    )
+
+                if is_challenge(url):
                     if not announced:
                         log.info("%s awaiting verification code", account_id)
+                        challenge = await describe_challenge(page, account_id)
                         await logins.set_status(
                             login_id,
                             logins.AWAITING_OTP,
                             account_id=account_id,
-                            step="verification code required",
+                            step="verification required",
+                            challenge=challenge,
                         )
                         announced = True
                     code = await logins.take_otp(login_id)
