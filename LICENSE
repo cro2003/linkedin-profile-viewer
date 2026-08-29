@@ -1,0 +1,65 @@
+Sourcely — Personal, Non-Commercial License
+Copyright (c) 2026 Chirag Rai. All rights reserved.
+
+This is a source-available license. It is NOT an OSI-approved open source
+license. The source code is provided so that individuals may inspect, learn
+from, and run it for their own personal use, subject to the terms below.
+
+1. DEFINITIONS
+   "Software" means this project's source code, assets, and documentation.
+   "You" means an individual exercising rights under this license.
+   "Non-commercial" means use that is not primarily intended for or directed
+   toward commercial advantage or monetary compensation.
+
+2. GRANT OF RIGHTS
+   Subject to the conditions and restrictions below, the copyright holder
+   grants You a worldwide, royalty-free, non-exclusive, non-transferable
+   license to:
+   (a) view and study the Software;
+   (b) install and run the Software for Your own personal, non-commercial
+       purposes; and
+   (c) modify the Software for Your own personal, non-commercial use.
+
+3. RESTRICTIONS
+   You may NOT, without the prior written permission of the copyright holder:
+   (a) redistribute, publish, sublicense, or share the Software or any
+       modified version of it, in source or compiled form;
+   (b) use the Software, in whole or in part, for any commercial, business,
+       or enterprise purpose;
+   (c) sell the Software, or offer it (or any derivative or service based on
+       it) to third parties, whether for a fee or free of charge, including
+       as a hosted or software-as-a-service offering; or
+   (d) remove or alter this license or any copyright notices.
+
+4. THIRD-PARTY TERMS AND DATA PROTECTION
+   The Software interacts with a third-party service whose terms of use do not
+   permit automated access. Nothing in this license grants You permission to
+   breach those terms, and the copyright holder makes no representation that
+   any particular use of the Software is lawful in Your jurisdiction. You are
+   solely responsible for the terms You are bound by, and for complying with
+   applicable data protection law, including the GDPR, in respect of any
+   personal data You process using the Software.
+
+5. NO TRADEMARK RIGHTS
+   This license does not grant any rights to use the names, logos, or
+   trademarks of the copyright holder or of any third party referenced by the
+   Software.
+
+6. NO WARRANTY
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+
+7. LIMITATION OF LIABILITY
+   IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR
+   OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE,
+   ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+   OTHER DEALINGS IN THE SOFTWARE.
+
+8. TERMINATION
+   Any use in breach of this license automatically terminates the rights
+   granted to You under it.
+
+For any use beyond the scope of this license — including commercial or
+enterprise use, or redistribution — please contact the copyright holder to
+arrange separate permission.
