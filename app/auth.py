@@ -35,9 +35,6 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-# --- passwords ---
-
-
 def hash_password(password: str, salt: bytes | None = None) -> tuple[str, str]:
     salt = salt or os.urandom(16)
     digest = hashlib.scrypt(
@@ -51,9 +48,6 @@ def verify_password(password: str, password_hash: str, salt_hex: str) -> bool:
     return hmac.compare_digest(candidate, password_hash)
 
 
-# --- api keys ---
-
-
 def new_api_key() -> tuple[str, str, str]:
     """Returns (plaintext, hash, prefix). Only the hash and prefix are stored."""
     key = f"sc_{secrets.token_urlsafe(32)}"
@@ -62,9 +56,6 @@ def new_api_key() -> tuple[str, str, str]:
 
 def hash_api_key(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
-
-
-# --- users ---
 
 
 async def ensure_indexes() -> None:
@@ -152,9 +143,6 @@ async def bootstrap_superadmin() -> None:
         log.warning("superadmin bootstrap skipped: %s", e.detail)
 
 
-# --- sessions ---
-
-
 async def start_session(user_id: str) -> str:
     token = secrets.token_urlsafe(32)
     await redis.set(f"sess:{token}", user_id, ex=settings.session_ttl_days * 86400)
@@ -174,16 +162,16 @@ async def user_for_api_key(key: str) -> dict | None:
     return await users.find_one({"api_key_hash": hash_api_key(key)})
 
 
-# --- callers ---
-
-
 class Caller:
-    """Who is making this request, and how it should be metered."""
+    """Who is making this request, and how it should be metered.
+
+    kind is one of `user`, `env_key` or `anon`; identity is the rate-limit bucket.
+    """
 
     def __init__(self, kind: str, user: dict | None = None, identity: str = "anon"):
-        self.kind = kind  # user | env_key | anon
+        self.kind = kind
         self.user = user
-        self.identity = identity  # rate-limit bucket key
+        self.identity = identity
 
     @property
     def is_authenticated(self) -> bool:
@@ -217,8 +205,7 @@ async def resolve_caller(
         user = await user_for_api_key(x_api_key)
         if user and not user.get("disabled"):
             return Caller("user", user, f"user:{user['_id']}")
-        # keys from the environment stay valid: they predate user accounts and are
-        # what the deployment's own tooling uses
+        # environment keys predate user accounts and stay valid
         if x_api_key in settings.api_keys:
             return Caller("env_key", None, f"key:{x_api_key[:12]}")
         raise HTTPException(401, {"code": "unauthorized", "message": "invalid API key"})
@@ -235,13 +222,10 @@ async def require_user(caller: Caller = Depends(resolve_caller)) -> Caller:
 
 async def require_superadmin(caller: Caller = Depends(resolve_caller)) -> Caller:
     if caller.kind == "env_key":
-        return caller  # deployment tooling
+        return caller
     if not caller.is_superadmin:
         raise HTTPException(403, {"code": "forbidden", "message": "superadmin only"})
     return caller
-
-
-# --- anonymous quota ---
 
 
 async def anon_usage(anon_id: str, ip: str) -> tuple[int, int]:

@@ -59,7 +59,6 @@ async def _lease_with_wait(job_id: str) -> "pool.Account":
 
 
 async def fetch_profile_job(ctx: dict, public_id: str, force_refresh: bool = False) -> dict:
-    # picks up admin config changes without a redeploy
     await runtime.apply_stored()
     job_id = job_id_for(public_id)
     attempt = ctx.get("job_try", 1)
@@ -111,7 +110,6 @@ async def fetch_profile_job(ctx: dict, public_id: str, force_refresh: bool = Fal
         return {"public_id": public_id, "error": "account_needs_cookies"}
 
     except session.LoginCheckpointRequired as e:
-        # not retryable by definition; surface it so an operator can act
         await metrics.incr("checkpoints")
         await metrics.incr("failures")
         await publish(job_id, "failed", error={"code": "account_needs_login", "message": str(e)})
@@ -132,8 +130,7 @@ async def fetch_profile_job(ctx: dict, public_id: str, force_refresh: bool = Fal
         return {"public_id": public_id, "error": "fetch_failed"}
 
     except Exception as e:
-        # never leave a job stuck mid-status: an unhandled error still has to be
-        # visible to whoever is polling or streaming it
+        # an unhandled error still has to be visible to whoever is polling
         log.exception("unexpected failure on %s", public_id)
         await publish(
             job_id,
@@ -195,11 +192,9 @@ class WorkerSettings:
     functions: ClassVar[list] = [fetch_profile_job, add_account_job]
     on_startup = startup
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
-    # one more than our own guard, so the job's terminal state is always published
-    # by our code rather than arq abandoning it silently
+    # one more than our own guard, so our code publishes the terminal state
     max_tries = MAX_TRIES + 1
     job_timeout = 300
-    # short: job state lives in Mongo, arq's copy is only needed briefly so that a
-    # later request for the same profile can reuse the stable job id
+    # job state lives in Mongo; arq's copy only needs to outlive the dedupe window
     keep_result = 10
     max_jobs = 4

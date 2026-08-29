@@ -20,7 +20,7 @@ def _now() -> datetime:
 
 
 def _as_utc(value: datetime) -> datetime:
-    # pymongo returns naive datetimes; everything stored here is UTC
+    # pymongo returns naive datetimes; everything here is UTC
     return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 

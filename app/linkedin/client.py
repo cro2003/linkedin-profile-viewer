@@ -101,7 +101,7 @@ def classify(status: int) -> type[FetchError] | None:
 class ProfileClient:
     def __init__(self, account: Account, transport: httpx.AsyncBaseTransport | None = None):
         self.account = account
-        self._transport = transport  # tests inject a mock transport here
+        self._transport = transport
         self._client: httpx.AsyncClient | None = None
         self._proxy_disabled = False
 
@@ -135,9 +135,8 @@ class ProfileClient:
         """
         if not self._client:
             return dict(self.account.cookies)
-        # Overlay onto the jar we started with. Cookies seeded into httpx carry an
-        # empty domain, so filtering on domain alone silently drops every one of
-        # them and leaves only what the server set this request.
+        # Overlay onto the jar we started with: cookies seeded into httpx carry an
+        # empty domain, so filtering on domain alone drops every one of them.
         merged = dict(self.account.cookies)
         for c in self._client.cookies.jar:
             if not c.domain or "linkedin.com" in c.domain:
@@ -180,7 +179,6 @@ class ProfileClient:
         r = await self._get(url)
 
         if r.status_code == 403:
-            # ambiguous upstream: no such profile, or our session is gone
             if await self.session_alive():
                 raise PermanentError(f"profile not found or not visible: {public_id}")
             raise SessionExpired(f"403 and session probe failed for {public_id}")

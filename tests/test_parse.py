@@ -23,8 +23,7 @@ def _payloads():
             payload = json.loads(f.read_text())
         except ValueError:
             continue
-        # only full-profile payloads; the vanity->urn resolver returns a
-        # Profile entity carrying nothing but an urn
+        # only full-profile payloads: the vanity->urn resolver returns a bare urn
         if any(
             e.get("$type", "").endswith("identity.profile.Profile") and e.get("publicIdentifier")
             for e in payload.get("included", [])
@@ -70,7 +69,6 @@ def test_sections_are_well_formed(payload):
             assert job.date_range and not job.date_range.end
     for school in profile.education:
         assert school.school
-    # current roles first, then most recent within each group
     flags = [j.is_current for j in profile.experience]
     assert flags == sorted(flags, reverse=True)
     for current in (True, False):

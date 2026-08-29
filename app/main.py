@@ -1,3 +1,10 @@
+"""FastAPI application: profile lookup, job status and progress streaming.
+
+A lookup is served from cache when it can be and queued otherwise, so the HTTP
+layer never blocks on an upstream fetch. Auth, admin and the web pages live in
+api_auth.py, api_admin.py and web.py.
+"""
+
 import json
 import logging
 import secrets
@@ -189,9 +196,7 @@ async def create_profile_request(
             await charge()
             return _response_from_doc(cached, cache_hit=True).model_dump(mode="json")
 
-    # accounts live in Mongo and are added through /admin, so the environment is
-    # only ever a first-boot seed — checking it here reported "no accounts" on any
-    # deployment whose accounts were added through the panel
+    # accounts live in Mongo; the environment is only ever a first-boot seed
     if not await accounts.list_accounts():
         raise HTTPException(
             503,
@@ -212,9 +217,8 @@ async def create_profile_request(
         )
 
     job_id = job_id_for(public_id)
-    # Enqueue first. A None return means arq already knows this job id, so a fetch
-    # is in flight (or just finished) and duplicate requests share it — but we must
-    # then report that job's real state rather than claiming a fresh "queued".
+    # Enqueue first: a None return means this job id is already in flight, so
+    # report that job's real state rather than claiming a fresh "queued".
     enqueued = await request.app.state.arq.enqueue_job(
         "fetch_profile_job", public_id, body.refresh, _job_id=job_id
     )
@@ -293,7 +297,7 @@ async def stream_job_events(job_id: str, request: Request):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # stops proxies buffering the stream
+            "X-Accel-Buffering": "no",  # stop proxies buffering the stream
         },
     )
 

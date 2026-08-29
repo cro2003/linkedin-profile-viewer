@@ -1,12 +1,7 @@
-# Opt-in: gives the worker a real browser, enabling
-#   - cookie re-minting when a session goes stale
-#   - "sign in" account creation, including OTP relay
-#
+# Opt-in: gives the worker a browser, enabling cookie re-minting and "sign in"
+# account creation with OTP relay. Costs ~2.2GB of disk, so check `df -h` first.
 #   docker compose -f docker-compose.yml -f docker-compose.browser.yml up -d --build
-#
-# Costs ~2.2GB of disk for the Playwright base image, so check `df -h` first.
-# Exactly one replica: an OTP login holds a browser open inside a single job, and
-# the admin panel has to reach that same process to hand over the code.
+# Keep one replica: an OTP login holds a browser open inside a single job.
 services:
   worker:
     build:

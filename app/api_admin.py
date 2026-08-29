@@ -5,7 +5,6 @@ from pydantic import BaseModel, Field
 
 from app import accounts, auth, logins, metrics, pool, runtime
 from app.db import redis
-from app.worker import job_id_for  # noqa: F401  (kept for symmetry with the lookup API
 
 router = APIRouter(
     prefix="/v1/admin", tags=["admin"], dependencies=[Depends(auth.require_superadmin)]
@@ -46,8 +45,12 @@ async def list_accounts():
 
 @router.post("/accounts")
 async def add_account(body: AccountIn, request: Request):
-    """Two ways in: paste a harvested cookie jar, or drive a real login (which may
-    need a verification code, relayed through /logins/{id}/otp)."""
+    """Add an account.
+
+    Two ways in: paste a harvested cookie jar, or drive a real login (which may need
+    a verification code, relayed through /logins/{id}/otp). In login mode the
+    password is handed to the job and never stored; only the cookies are kept.
+    """
     if body.mode == "cookies":
         if not body.cookies:
             raise HTTPException(
@@ -83,7 +86,6 @@ async def add_account(body: AccountIn, request: Request):
     await request.app.state.arq.enqueue_job(
         "add_account_job", login_id, body.id, body.email, body.password, body.proxy_url, body.note
     )
-    # the password is passed to the job and never stored
     return {
         "login_id": login_id,
         "account_id": body.id,
@@ -174,7 +176,6 @@ async def patch_user(
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(422, {"code": "nothing_to_update", "message": "no fields given"})
-    # refuse to let the signed-in admin lock themselves out
     if (
         caller.user
         and caller.user["_id"] == user_id

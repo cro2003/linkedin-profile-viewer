@@ -26,16 +26,13 @@ FEED_URL = "https://www.linkedin.com/feed/"
 LOGIN_URL = "https://www.linkedin.com/login"
 LOGGED_OUT_MARKERS = ("/login", "/authwall", "/uas/login", "/checkpoint")
 
-# The sign-in form has no stable ids: LinkedIn renders React-generated ones like
-# «Rsvvriejj35659j6», and ships two copies of the form on the page. Input *types*
-# are stable, so match on those, keep the older id/name variants as fallbacks, and
-# take the visible copy.
+# The sign-in form has no stable ids: LinkedIn renders React-generated ones and
+# ships two copies of the form. Input types are stable, so match on those.
 USER_SELECTOR = "#username:visible, input[name='session_key']:visible, input[type='email']:visible"
 PASS_SELECTOR = (
     "#password:visible, input[name='session_password']:visible, input[type='password']:visible"
 )
 SUBMIT_SELECTOR = "button[type='submit']:visible"
-# the verification-code field is as unstably named as the login inputs
 OTP_SELECTOR = (
     "input[name='pin']:visible, input[type='tel']:visible, "
     "input[autocomplete='one-time-code']:visible, input[type='text']:visible"
@@ -136,8 +133,6 @@ async def _harvest(account: Account) -> dict[str, str]:
                 try:
                     await user_field.wait_for(timeout=15_000)
                 except Exception as e:
-                    # report what we were actually served, so this is diagnosable
-                    # from logs alone instead of needing a live reproduction
                     inputs = await page.evaluate(
                         "() => [...document.querySelectorAll('input')]"
                         ".map(i => i.type + ':' + (i.id || i.name || '?'))"
@@ -151,10 +146,8 @@ async def _harvest(account: Account) -> dict[str, str]:
                 await user_field.fill(account.email)
                 password_field = page.locator(PASS_SELECTOR).first
                 await password_field.fill(account.password)
-                # submit with Enter rather than hunting for the button: the button
-                # markup is as unstable as the input ids, the form submits on Enter
+                # submit with Enter: the button markup is as unstable as the input ids
                 await password_field.press("Enter")
-                # settle on either a signed-in page or a challenge, whichever comes
                 try:
                     await page.wait_for_url(
                         lambda u: not _logged_out(u) or "checkpoint" in u, timeout=45_000
@@ -206,14 +199,12 @@ async def refresh(account: Account) -> dict[str, str]:
         log.info("refreshed cookies for %s", account.id)
         return cookies
     except (LoginCheckpointRequired, BrowserUnavailable) as e:
-        # both need a human: a checkpoint needs a code, a browserless worker needs a
-        # pasted jar. Park the account either way so the pool stops handing it out.
+        # a checkpoint needs a code, a browserless worker needs a pasted jar
         log.error("%s needs human action: %s", account.id, e)
         await pool.set_status(account.id, pool.NEEDS_LOGIN)
         raise
     except Exception as e:
-        # a failed refresh is not automatically fatal; the account gets one more
-        # chance on the next job before anything marks it dead
+        # a failed refresh is not fatal; the account gets another chance next job
         log.error("cookie refresh failed for %s: %s", account.id, e)
         await pool.set_status(account.id, pool.LIVE)
         raise SessionRefreshFailed(str(e)) from e

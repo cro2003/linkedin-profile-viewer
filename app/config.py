@@ -1,3 +1,10 @@
+"""Settings, loaded from the environment.
+
+Values here are defaults and first-boot seeds. LinkedIn accounts live in Mongo
+(app/accounts.py) and rate limits can be overridden at runtime (app/runtime.py),
+so the environment is not the last word on either.
+"""
+
 import json
 from typing import Annotated
 
@@ -13,8 +20,7 @@ class Account(BaseModel):
     id: str
     cookies: dict[str, str]
     proxy_url: str | None = None
-    # only used to re-login when the persisted browser profile cannot self-heal;
-    # the usual refresh path needs no credentials at all
+    # only used to re-login when the browser profile cannot self-heal
     email: str | None = None
     password: str | None = None
 
@@ -46,19 +52,17 @@ class Settings(BaseSettings):
     account_min_delay_sec: float = 8
     account_max_delay_sec: float = 20
     proxy_required: bool = False
-    # inbound limits: writes may cost an upstream fetch, reads are cheap
     rate_limit_write_per_min: int = 10
     rate_limit_read_per_min: int = 60
     trust_proxy_headers: bool = False
 
-    # --- users / auth ---
     superadmin_email: str | None = None
     superadmin_password: str | None = None
     session_ttl_days: int = 7
     session_cookie_name: str = "sourcely_session"
     anon_cookie_name: str = "sourcely_anon"
-    # free lookups before signup is required: per browser, and a looser per-IP cap so
-    # clearing cookies does not reset the quota while shared NAT is not punished
+    # per-browser free quota, plus a looser per-IP cap so clearing cookies
+    # does not reset it while shared NAT is not punished
     anon_free_lookups: int = 5
     anon_ip_lookups: int = 15
     # set true once served over HTTPS so cookies are not sent in the clear
@@ -67,7 +71,6 @@ class Settings(BaseSettings):
     browser_profile_dir: str = "/data/browser"
     browser_headless: bool = True
     cookie_refresh_timeout_sec: float = 90
-    # how long an admin has to supply a verification code before the attempt is dropped
     otp_wait_sec: int = 600
     cache_ttl_hours: int = 24
     negative_cache_ttl_hours: int = 1

@@ -1,3 +1,11 @@
+"""Response schema.
+
+Almost every field is optional because LinkedIn omits liberally, and a caller is
+better served by a profile with gaps than by an error. Dates keep their raw parts
+rather than being coerced into one string, and Meta.sections reports how complete
+each section is.
+"""
+
 from datetime import datetime
 
 from pydantic import BaseModel, Field

@@ -22,8 +22,7 @@ from app.db import redis
 log = logging.getLogger(__name__)
 
 LIVE, REFRESHING, DEAD = "live", "refreshing", "dead"
-# a checkpoint (verification code, captcha) cannot be cleared by retrying: the
-# account is out of action until a human signs in again
+# a checkpoint cannot be cleared by retrying: a human must sign in again
 NEEDS_LOGIN = "needs_login"
 UNUSABLE = (DEAD, NEEDS_LOGIN)
 
@@ -57,7 +56,6 @@ async def lease() -> Account | None:
         next_ok = await redis.get(_k(account.id, "next_ok_at"))
         if next_ok and time.time() < float(next_ok):
             continue
-        # NX lock == one in-flight request per account
         if not await redis.set(_k(account.id, "lock"), "1", nx=True, ex=LEASE_TTL_SEC):
             continue
         return account

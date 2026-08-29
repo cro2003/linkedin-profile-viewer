@@ -10,7 +10,7 @@ import secrets
 
 from app.db import redis
 
-TTL = 900  # a login attempt is abandoned after 15 minutes
+TTL = 900  # 15 minutes
 
 RUNNING, AWAITING_OTP, DONE, FAILED = "running", "awaiting_otp", "done", "failed"
 

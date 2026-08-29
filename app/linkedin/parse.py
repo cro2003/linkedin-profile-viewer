@@ -18,7 +18,6 @@ from app.models import (
 )
 from app.urls import canonical_url
 
-# collection references on the profile entity, and the section each one fills
 COLLECTION_REFS = {
     "skills": "*profileSkills",
     "certifications": "*profileCertifications",
@@ -239,7 +238,6 @@ def parse_profile(
         sections[name] = SectionInfo(
             returned=returned,
             total=total,
-            # only the first page of a collection comes back with the profile
             complete=(total is None or returned >= total),
         )
 

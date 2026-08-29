@@ -10,11 +10,8 @@ services:
     restart: unless-stopped
 
   worker:
-    # Slim image by default: no browser. Accounts are added by pasting a cookie jar
-    # in /admin, which needs no browser at all. For browser-based cookie re-minting
-    # and OTP login, add the opt-in overlay:
-    #   docker compose -f docker-compose.yml -f docker-compose.browser.yml up -d
-    # That pulls a ~2.2GB Playwright image, so check disk first.
+    # Slim by default: accounts are added by pasting a cookie jar in /admin.
+    # For browser-based cookie re-minting, add docker-compose.browser.yml.
     build: .
     command: ["arq", "app.worker.WorkerSettings"]
     env_file: .env

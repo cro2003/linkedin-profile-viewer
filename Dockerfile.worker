@@ -1,6 +1,5 @@
-# Playwright's own image so the pinned browser matches the pinned client library.
-# The API image stays slim: only the worker needs a browser, and only for
-# re-minting cookie jars.
+# Playwright's own image so the browser matches the pinned client library.
+# Only used with docker-compose.browser.yml.
 FROM mcr.microsoft.com/playwright/python:v1.62.0-noble
 
 WORKDIR /app

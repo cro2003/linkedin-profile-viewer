@@ -1,16 +1,13 @@
-# Overlay for our VM, where Traefik already runs on the external `proxy` network.
+# Overlay for the VM, where Traefik already runs on the external `proxy` network:
 #   docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d --build
-#
-# Only the API is published. The worker, Mongo and Redis stay on the internal
-# network with no route in from outside.
+# Only the API is routed; worker, Mongo and Redis stay internal.
 services:
   api:
     ports: !reset []
     environment:
       COOKIE_SECURE: "true"
-      # Correct ONLY behind Traefik, which sets X-Forwarded-For itself. Enabled
-      # without a trusted proxy in front, any caller could forge the header and
-      # reset their free-lookup quota at will.
+      # Safe ONLY behind Traefik, which sets X-Forwarded-For itself: without a
+      # trusted proxy, callers could forge it and reset their free quota at will.
       TRUST_PROXY_HEADERS: "true"
     labels:
       - traefik.enable=true

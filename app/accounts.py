@@ -30,7 +30,7 @@ def _to_account(doc: dict) -> Account:
         cookies=doc.get("cookies") or {},
         proxy_url=doc.get("proxy_url"),
         email=doc.get("email"),
-        password=None,  # never persisted; present on the model for transient use
+        password=None,  # never persisted
     )
 
 
