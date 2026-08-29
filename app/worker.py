@@ -104,6 +104,12 @@ async def fetch_profile_job(ctx: dict, public_id: str, force_refresh: bool = Fal
         await publish(job_id, "failed", error={"code": code, "message": str(e)})
         return {"public_id": public_id, "error": code}
 
+    except session.BrowserUnavailable as e:
+        # retrying cannot help: this worker will never grow a browser mid-job
+        await metrics.incr("failures")
+        await publish(job_id, "failed", error={"code": "account_needs_cookies", "message": str(e)})
+        return {"public_id": public_id, "error": "account_needs_cookies"}
+
     except session.LoginCheckpointRequired as e:
         # not retryable by definition; surface it so an operator can act
         await metrics.incr("checkpoints")

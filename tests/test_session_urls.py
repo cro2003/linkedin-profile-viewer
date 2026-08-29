@@ -48,3 +48,14 @@ def test_logged_out_matches_path_only():
     assert _logged_out("https://www.linkedin.com/feed/") is False
     # a redirect target in the query must not count as being logged out
     assert _logged_out("https://www.linkedin.com/in/me?next=/login") is False
+
+
+def test_terminal_failures_are_distinguishable():
+    """Both mean "a human must act", but they need different messages to the operator,
+    and neither may be retried like a transient upstream error."""
+    from app.session import BrowserUnavailable, LoginCheckpointRequired, SessionRefreshFailed
+
+    assert issubclass(LoginCheckpointRequired, SessionRefreshFailed)
+    assert issubclass(BrowserUnavailable, SessionRefreshFailed)
+    assert not issubclass(BrowserUnavailable, LoginCheckpointRequired)
+    assert not issubclass(LoginCheckpointRequired, BrowserUnavailable)

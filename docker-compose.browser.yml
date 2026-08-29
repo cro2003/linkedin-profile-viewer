@@ -1,0 +1,22 @@
+# Opt-in: gives the worker a real browser, enabling
+#   - cookie re-minting when a session goes stale
+#   - "sign in" account creation, including OTP relay
+#
+#   docker compose -f docker-compose.yml -f docker-compose.browser.yml up -d --build
+#
+# Costs ~2.2GB of disk for the Playwright base image, so check `df -h` first.
+# Exactly one replica: an OTP login holds a browser open inside a single job, and
+# the admin panel has to reach that same process to hand over the code.
+services:
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    command: ["arq", "app.worker.WorkerSettings"]
+    environment:
+      BROWSER_PROFILE_DIR: /data/browser
+    volumes:
+      - browser_profiles:/data/browser
+
+volumes:
+  browser_profiles:

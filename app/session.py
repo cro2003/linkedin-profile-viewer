@@ -59,6 +59,24 @@ class LoginCheckpointRequired(SessionRefreshFailed):
     pass
 
 
+class BrowserUnavailable(SessionRefreshFailed):
+    """This worker has no browser, so cookies cannot be re-minted here."""
+
+    pass
+
+
+def _import_playwright():
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError as e:
+        raise BrowserUnavailable(
+            "this worker image has no browser, so cookies cannot be refreshed "
+            "automatically. Paste a fresh cookie jar for the account in /admin, or "
+            "run the worker with docker-compose.browser.yml to enable re-minting."
+        ) from e
+    return async_playwright
+
+
 def _logged_out(url: str) -> bool:
     return any(marker in urlparse(url).path for marker in LOGGED_OUT_MARKERS)
 
@@ -83,8 +101,7 @@ def login_error(url: str) -> str | None:
 
 
 async def _harvest(account: Account) -> dict[str, str]:
-    # imported lazily so the API image does not need a browser installed
-    from playwright.async_api import async_playwright
+    async_playwright = _import_playwright()
 
     profile_dir = Path(settings.browser_profile_dir) / account.id
     profile_dir.mkdir(parents=True, exist_ok=True)
@@ -188,9 +205,10 @@ async def refresh(account: Account) -> dict[str, str]:
         await pool.set_status(account.id, pool.LIVE)
         log.info("refreshed cookies for %s", account.id)
         return cookies
-    except LoginCheckpointRequired as e:
-        # park the account: further attempts only add failed logins to its record
-        log.error("%s needs a human sign-in: %s", account.id, e)
+    except (LoginCheckpointRequired, BrowserUnavailable) as e:
+        # both need a human: a checkpoint needs a code, a browserless worker needs a
+        # pasted jar. Park the account either way so the pool stops handing it out.
+        log.error("%s needs human action: %s", account.id, e)
         await pool.set_status(account.id, pool.NEEDS_LOGIN)
         raise
     except Exception as e:
@@ -268,7 +286,7 @@ async def login_and_harvest(
     inside one worker job rather than across requests. The resulting profile
     directory keeps the remember-me cookie, so later refreshes need no password.
     """
-    from playwright.async_api import async_playwright
+    async_playwright = _import_playwright()
 
     profile_dir = Path(settings.browser_profile_dir) / account_id
     profile_dir.mkdir(parents=True, exist_ok=True)

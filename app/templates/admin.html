@@ -35,7 +35,7 @@
         <input type="radio" name="mode" value="cookies" checked onchange="switchMode()"> Paste cookie jar
       </label>
       <label class="flex items-center gap-2 text-slate-300">
-        <input type="radio" name="mode" value="login" onchange="switchMode()"> Sign in (may need a code)
+        <input type="radio" name="mode" value="login" onchange="switchMode()"> Sign in (needs browser worker)
       </label>
     </div>
 
@@ -57,7 +57,9 @@
         <input id="acct-password" type="password" placeholder="linkedin password" class="field rounded-lg px-3 py-2 text-slate-100">
       </div>
       <p class="mt-1.5 text-xs text-slate-600">The password is used once to sign in and is never stored — only the
-         resulting cookies are. Signing in usually triggers a verification code.</p>
+         resulting cookies are. Requires a worker started with
+         <code class="text-slate-500">docker-compose.browser.yml</code>; LinkedIn also often refuses
+         scripted logins outright, so pasting a jar is the reliable route.</p>
     </div>
 
     <button onclick="addAccount()" class="mt-4 rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-2 text-white">Add account</button>

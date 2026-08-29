@@ -10,16 +10,14 @@ services:
     restart: unless-stopped
 
   worker:
-    # exactly one replica: an OTP login keeps a browser open inside a single job,
-    # and the admin panel must reach that same process to hand over the code
-    build:
-      context: .
-      dockerfile: Dockerfile.worker
+    # Slim image by default: no browser. Accounts are added by pasting a cookie jar
+    # in /admin, which needs no browser at all. For browser-based cookie re-minting
+    # and OTP login, add the opt-in overlay:
+    #   docker compose -f docker-compose.yml -f docker-compose.browser.yml up -d
+    # That pulls a ~2.2GB Playwright image, so check disk first.
+    build: .
+    command: ["arq", "app.worker.WorkerSettings"]
     env_file: .env
-    environment:
-      BROWSER_PROFILE_DIR: /data/browser
-    volumes:
-      - browser_profiles:/data/browser
     depends_on:
       - mongo
       - redis
@@ -41,4 +39,3 @@ services:
 volumes:
   mongo_data:
   redis_data:
-  browser_profiles:
