@@ -12,11 +12,12 @@ normal path, because scripted logins are what draw a challenge.
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 
 from app.config import Account, settings
 from app.db import redis
-from app import accounts, pool
+from app import accounts, logins, pool
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +34,9 @@ USER_SELECTOR = ("#username:visible, input[name='session_key']:visible, "
 PASS_SELECTOR = ("#password:visible, input[name='session_password']:visible, "
                  "input[type='password']:visible")
 SUBMIT_SELECTOR = "button[type='submit']:visible"
+# the verification-code field is as unstably named as the login inputs
+OTP_SELECTOR = ("input[name='pin']:visible, input[type='tel']:visible, "
+                "input[autocomplete='one-time-code']:visible, input[type='text']:visible")
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36")
@@ -165,3 +169,100 @@ async def refresh(account: Account) -> dict[str, str]:
         raise SessionRefreshFailed(str(e)) from e
     finally:
         await redis.delete(lock_key)
+
+
+async def _submit_login(page, email: str, password: str) -> None:
+    await page.goto(LOGIN_URL, wait_until="domcontentloaded")
+    field = page.locator(USER_SELECTOR).first
+    await field.wait_for(timeout=20_000)
+    await field.fill(email)
+    password_field = page.locator(PASS_SELECTOR).first
+    await password_field.fill(password)
+    await password_field.press("Enter")
+    await page.wait_for_load_state("domcontentloaded")
+
+
+async def _submit_otp(page, code: str) -> None:
+    field = page.locator(OTP_SELECTOR).first
+    await field.wait_for(timeout=15_000)
+    await field.fill(code)
+    try:
+        await field.press("Enter")
+        await page.wait_for_load_state("domcontentloaded", timeout=30_000)
+    except Exception:
+        await page.locator(SUBMIT_SELECTOR).first.click()
+        await page.wait_for_load_state("domcontentloaded", timeout=30_000)
+
+
+async def login_and_harvest(account_id: str, email: str, password: str,
+                            proxy_url: str | None, login_id: str) -> dict[str, str]:
+    """Sign an account in, relaying a verification code from the admin panel.
+
+    The browser context stays open for the whole attempt, which is why this runs
+    inside one worker job rather than across requests. The resulting profile
+    directory keeps the remember-me cookie, so later refreshes need no password.
+    """
+    from playwright.async_api import async_playwright
+
+    profile_dir = Path(settings.browser_profile_dir) / account_id
+    profile_dir.mkdir(parents=True, exist_ok=True)
+
+    async with async_playwright() as p:
+        context = await p.chromium.launch_persistent_context(
+            str(profile_dir),
+            headless=settings.browser_headless,
+            user_agent=UA,
+            viewport={"width": 1440, "height": 900},
+            locale="en-US",
+            timezone_id="Asia/Kolkata",
+            proxy={"server": proxy_url} if proxy_url else None,
+        )
+        try:
+            page = context.pages[0] if context.pages else await context.new_page()
+
+            await page.goto(FEED_URL, wait_until="domcontentloaded")
+            if _logged_out(page.url):
+                await logins.set_status(login_id, logins.RUNNING,
+                                        account_id=account_id, step="submitting credentials")
+                await _submit_login(page, email, password)
+
+            deadline = time.time() + settings.otp_wait_sec
+            announced = False
+            while time.time() < deadline:
+                url = page.url
+                if not _logged_out(url):
+                    break
+
+                if "checkpoint" in url or "challenge" in url:
+                    if not announced:
+                        log.info("%s awaiting verification code", account_id)
+                        await logins.set_status(login_id, logins.AWAITING_OTP,
+                                                account_id=account_id,
+                                                step="verification code required")
+                        announced = True
+                    code = await logins.take_otp(login_id)
+                    if code:
+                        await logins.set_status(login_id, logins.RUNNING,
+                                                account_id=account_id, step="submitting code")
+                        announced = False
+                        try:
+                            await _submit_otp(page, code)
+                        except Exception as e:
+                            await logins.set_status(login_id, logins.AWAITING_OTP,
+                                                    account_id=account_id,
+                                                    step=f"code rejected: {type(e).__name__}")
+                            announced = True
+                await asyncio.sleep(2)
+            else:
+                raise SessionRefreshFailed(
+                    f"{account_id}: login not completed within {settings.otp_wait_sec}s "
+                    f"(last url {page.url})")
+
+            cookies = {c["name"]: c["value"]
+                       for c in await context.cookies("https://www.linkedin.com")}
+            missing = [c for c in ("li_at", "JSESSIONID") if not cookies.get(c)]
+            if missing:
+                raise SessionRefreshFailed(f"{account_id}: harvested jar missing {missing}")
+            return cookies
+        finally:
+            await context.close()

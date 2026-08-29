@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Sign in' if mode == 'login' else 'Sign up' }} · Profile API{% endblock %}
+{% block content %}
+
+<div class="max-w-sm mx-auto">
+  <h1 class="text-2xl font-semibold text-slate-100 mb-1">
+    {{ 'Welcome back' if mode == 'login' else 'Create an account' }}
+  </h1>
+  <p class="text-sm text-slate-400 mb-6">
+    {% if mode == 'login' %}Sign in to use your API key and higher limits.
+    {% else %}Free lookups without limits per browser, plus an API key.{% endif %}
+  </p>
+
+  <form id="form" class="card rounded-xl p-5 space-y-4">
+    <div>
+      <label class="block text-sm text-slate-400 mb-1.5" for="email">Email</label>
+      <input id="email" type="email" required autocomplete="email"
+             class="field w-full rounded-lg px-3 py-2 text-slate-100">
+    </div>
+    <div>
+      <label class="block text-sm text-slate-400 mb-1.5" for="password">Password</label>
+      <input id="password" type="password" required minlength="8"
+             autocomplete="{{ 'current-password' if mode == 'login' else 'new-password' }}"
+             class="field w-full rounded-lg px-3 py-2 text-slate-100">
+      {% if mode == 'signup' %}<p class="mt-1.5 text-xs text-slate-600">At least 8 characters.</p>{% endif %}
+    </div>
+    <button id="submit" class="w-full rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50
+                               px-4 py-2.5 font-medium text-white">
+      {{ 'Sign in' if mode == 'login' else 'Create account' }}
+    </button>
+    <div id="error" class="hidden text-sm text-red-300"></div>
+  </form>
+
+  <p class="mt-4 text-sm text-slate-500">
+    {% if mode == 'login' %}
+      No account? <a href="/signup" class="text-blue-400 hover:text-blue-300">Sign up</a>
+    {% else %}
+      Already registered? <a href="/login" class="text-blue-400 hover:text-blue-300">Sign in</a>
+    {% endif %}
+  </p>
+
+  <div id="key" class="hidden mt-6 card rounded-xl p-5">
+    <h2 class="font-medium text-slate-100">Your API key</h2>
+    <p class="text-sm text-slate-400 mt-1">Copy it now — it is stored hashed and will not be shown again.</p>
+    <pre id="keyvalue" class="mt-3 overflow-x-auto rounded-lg bg-slate-950 p-3 text-xs text-blue-300"></pre>
+    <a href="/dashboard" class="inline-block mt-3 rounded-md bg-blue-600 hover:bg-blue-500 px-3 py-1.5 text-white">Continue</a>
+  </div>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+const MODE = "{{ mode }}";
+document.getElementById('form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const button = document.getElementById('submit');
+  const error = document.getElementById('error');
+  button.disabled = true;
+  error.classList.add('hidden');
+
+  const response = await fetch(`/v1/auth/${MODE === 'login' ? 'login' : 'signup'}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      email: document.getElementById('email').value,
+      password: document.getElementById('password').value,
+    }),
+  });
+  const body = await response.json();
+
+  if (!response.ok) {
+    error.textContent = (body.error && body.error.message) || 'Something went wrong';
+    error.classList.remove('hidden');
+    button.disabled = false;
+    return;
+  }
+  if (body.api_key) {
+    // shown once, so make the user acknowledge it before moving on
+    document.getElementById('form').classList.add('hidden');
+    document.getElementById('keyvalue').textContent = body.api_key;
+    document.getElementById('key').classList.remove('hidden');
+  } else {
+    location.href = '/dashboard';
+  }
+});
+</script>
+{% endblock %}

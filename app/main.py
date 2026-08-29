@@ -11,7 +11,8 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from app import accounts, api_auth, auth, metrics, pool, ratelimit, store
+from app import (accounts, api_admin, api_auth, auth, metrics, pool, ratelimit,
+                 runtime, store, web)
 from app.config import settings
 from app.db import mongo, redis
 from app.models import Meta, Profile, ProfileResponse
@@ -35,6 +36,7 @@ async def lifespan(app: FastAPI):
         await auth.ensure_indexes()
         await auth.bootstrap_superadmin()
         await store.ensure_indexes()
+        await runtime.apply_stored()
     except Exception as e:  # boot even with cold dependencies; /health reports it
         log.warning("startup partially failed: %s", e)
     yield
@@ -44,6 +46,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="LinkedIn Profile API", version="0.3.0", lifespan=lifespan)
 app.include_router(api_auth.router)
+app.include_router(api_admin.router)
+app.include_router(web.router)
 
 
 @app.middleware("http")

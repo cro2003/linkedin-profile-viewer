@@ -1,0 +1,301 @@
+{% extends "base.html" %}
+{% block title %}Admin · Profile API{% endblock %}
+{% block content %}
+
+<h1 class="text-2xl font-semibold text-slate-100 mb-6">Admin</h1>
+
+<div class="flex gap-1 border-b border-slate-800 mb-5 text-sm">
+  {% for tab, label in [('accounts','Accounts'), ('config','Config'), ('users','Users'), ('stats','Health')] %}
+    <button data-tab="{{ tab }}" onclick="showTab('{{ tab }}')"
+            class="tab px-4 py-2 border-b-2 border-transparent text-slate-400 hover:text-slate-200">{{ label }}</button>
+  {% endfor %}
+</div>
+
+<section id="tab-accounts" class="tabpanel">
+  <div class="card rounded-xl overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-900/60 text-xs uppercase tracking-wide text-slate-500">
+        <tr>
+          <th class="text-left px-4 py-2.5">Account</th>
+          <th class="text-left px-4 py-2.5">Status</th>
+          <th class="text-left px-4 py-2.5">Cooldown</th>
+          <th class="text-left px-4 py-2.5">Jar</th>
+          <th class="text-left px-4 py-2.5">Proxy</th>
+          <th class="text-right px-4 py-2.5">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="accounts-body"></tbody>
+    </table>
+  </div>
+
+  <div class="card rounded-xl p-5 mt-4">
+    <h2 class="font-medium text-slate-100">Add an account</h2>
+    <div class="flex gap-4 mt-3 text-sm">
+      <label class="flex items-center gap-2 text-slate-300">
+        <input type="radio" name="mode" value="cookies" checked onchange="switchMode()"> Paste cookie jar
+      </label>
+      <label class="flex items-center gap-2 text-slate-300">
+        <input type="radio" name="mode" value="login" onchange="switchMode()"> Sign in (may need a code)
+      </label>
+    </div>
+
+    <div class="grid gap-3 mt-4 sm:grid-cols-2">
+      <input id="acct-id" placeholder="account id, e.g. acct2" class="field rounded-lg px-3 py-2 text-slate-100">
+      <input id="acct-proxy" placeholder="proxy url (optional)" class="field rounded-lg px-3 py-2 text-slate-100">
+    </div>
+
+    <div id="mode-cookies" class="mt-3">
+      <textarea id="acct-cookies" rows="4" placeholder='{"li_at":"…","JSESSIONID":"ajax:…","lidc":"…"}'
+                class="field w-full rounded-lg px-3 py-2 text-xs font-mono text-slate-100"></textarea>
+      <p class="mt-1.5 text-xs text-slate-600">Paste the full jar from a signed-in browser. A partial jar is rejected —
+         the routing cookies are required or every request loops on redirects.</p>
+    </div>
+
+    <div id="mode-login" class="mt-3 hidden">
+      <div class="grid gap-3 sm:grid-cols-2">
+        <input id="acct-email" type="email" placeholder="linkedin email" class="field rounded-lg px-3 py-2 text-slate-100">
+        <input id="acct-password" type="password" placeholder="linkedin password" class="field rounded-lg px-3 py-2 text-slate-100">
+      </div>
+      <p class="mt-1.5 text-xs text-slate-600">The password is used once to sign in and is never stored — only the
+         resulting cookies are. Signing in usually triggers a verification code.</p>
+    </div>
+
+    <button onclick="addAccount()" class="mt-4 rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-2 text-white">Add account</button>
+
+    <div id="login-progress" class="hidden mt-4 rounded-lg border border-blue-900/60 bg-blue-950/30 p-4">
+      <div id="login-step" class="text-sm text-slate-200">Starting…</div>
+      <div id="otp-box" class="hidden mt-3">
+        <label class="block text-sm text-slate-300 mb-1.5">Verification code</label>
+        <div class="flex gap-2">
+          <input id="otp-code" inputmode="numeric" placeholder="123456"
+                 class="field rounded-lg px-3 py-2 text-slate-100 w-40">
+          <button onclick="sendOtp()" class="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-2 text-white">Submit code</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="tab-config" class="tabpanel hidden">
+  <div class="card rounded-xl p-5">
+    <h2 class="font-medium text-slate-100">Runtime configuration</h2>
+    <p class="text-sm text-slate-400 mt-1">Overrides the environment. Applied immediately;
+       the worker picks changes up on its next job.</p>
+    <div id="config-fields" class="grid gap-3 mt-4 sm:grid-cols-2"></div>
+    <button onclick="saveConfig()" class="mt-4 rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-2 text-white">Save</button>
+    <div id="config-msg" class="mt-3 text-sm"></div>
+  </div>
+</section>
+
+<section id="tab-users" class="tabpanel hidden">
+  <div class="card rounded-xl overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-900/60 text-xs uppercase tracking-wide text-slate-500">
+        <tr>
+          <th class="text-left px-4 py-2.5">Email</th>
+          <th class="text-left px-4 py-2.5">Role</th>
+          <th class="text-left px-4 py-2.5">Lookups</th>
+          <th class="text-left px-4 py-2.5">Key</th>
+          <th class="text-right px-4 py-2.5">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="users-body"></tbody>
+    </table>
+  </div>
+</section>
+
+<section id="tab-stats" class="tabpanel hidden">
+  <div id="counters" class="grid gap-3 sm:grid-cols-3"></div>
+  <div class="card rounded-xl p-5 mt-4">
+    <h2 class="font-medium text-slate-100">Dependencies</h2>
+    <pre id="health" class="mt-3 overflow-x-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-400"></pre>
+  </div>
+</section>
+
+{% endblock %}
+{% block scripts %}
+<script>
+const $ = (id) => document.getElementById(id);
+let pollTimer = null, currentLogin = null;
+
+const STATUS_STYLE = {
+  live: 'text-emerald-400', needs_login: 'text-amber-400',
+  refreshing: 'text-blue-400', dead: 'text-red-400', disabled: 'text-slate-500',
+};
+
+function showTab(name) {
+  document.querySelectorAll('.tabpanel').forEach(p => p.classList.add('hidden'));
+  $(`tab-${name}`).classList.remove('hidden');
+  document.querySelectorAll('.tab').forEach(t => {
+    const on = t.dataset.tab === name;
+    t.classList.toggle('border-blue-500', on);
+    t.classList.toggle('text-slate-100', on);
+  });
+  ({ accounts: loadAccounts, config: loadConfig, users: loadUsers, stats: loadStats }[name])();
+}
+
+async function api(path, options) {
+  const response = await fetch(path, options);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error((body.error && body.error.message) || `HTTP ${response.status}`);
+  return body;
+}
+
+// --- accounts ---
+async function loadAccounts() {
+  const { accounts } = await api('/v1/admin/accounts');
+  $('accounts-body').innerHTML = accounts.map(a => `
+    <tr class="border-t border-slate-800">
+      <td class="px-4 py-2.5 text-slate-200">${a.id}</td>
+      <td class="px-4 py-2.5 ${STATUS_STYLE[a.status] || 'text-slate-400'}">
+        ${a.status}${a.busy ? ' · busy' : ''}</td>
+      <td class="px-4 py-2.5 text-slate-400">${a.cooldown_sec ? a.cooldown_sec + 's' : '–'}</td>
+      <td class="px-4 py-2.5 text-slate-400">${a.has_cookies ? 'yes' : 'missing'}</td>
+      <td class="px-4 py-2.5 text-slate-400">${a.proxy ? 'yes' : 'direct'}</td>
+      <td class="px-4 py-2.5 text-right whitespace-nowrap">
+        <button onclick="patchAccount('${a.id}', {clear_cooldown:true, reset_status:true})"
+                class="text-xs text-slate-400 hover:text-slate-200">reset</button>
+        <button onclick="patchAccount('${a.id}', {disabled:${a.status !== 'disabled'}})"
+                class="ml-3 text-xs text-slate-400 hover:text-slate-200">
+                ${a.status === 'disabled' ? 'enable' : 'disable'}</button>
+        <button onclick="deleteAccount('${a.id}')"
+                class="ml-3 text-xs text-red-400 hover:text-red-300">delete</button>
+      </td>
+    </tr>`).join('') || `<tr><td colspan="6" class="px-4 py-6 text-center text-slate-500">No accounts yet</td></tr>`;
+}
+
+async function patchAccount(id, body) {
+  try { await api(`/v1/admin/accounts/${id}`, {
+    method: 'PATCH', headers: {'content-type':'application/json'}, body: JSON.stringify(body) });
+    loadAccounts();
+  } catch (e) { alert(e.message); }
+}
+
+async function deleteAccount(id) {
+  if (!confirm(`Delete account ${id}? Its stored cookies are removed.`)) return;
+  try { await api(`/v1/admin/accounts/${id}`, { method: 'DELETE' }); loadAccounts(); }
+  catch (e) { alert(e.message); }
+}
+
+function switchMode() {
+  const mode = document.querySelector('input[name=mode]:checked').value;
+  $('mode-cookies').classList.toggle('hidden', mode !== 'cookies');
+  $('mode-login').classList.toggle('hidden', mode !== 'login');
+}
+
+async function addAccount() {
+  const mode = document.querySelector('input[name=mode]:checked').value;
+  const payload = { id: $('acct-id').value.trim(), mode,
+                    proxy_url: $('acct-proxy').value.trim() || null };
+  if (!payload.id) return alert('An account id is required');
+
+  if (mode === 'cookies') {
+    try { payload.cookies = JSON.parse($('acct-cookies').value); }
+    catch (e) { return alert('Cookies must be valid JSON'); }
+  } else {
+    payload.email = $('acct-email').value.trim();
+    payload.password = $('acct-password').value;
+  }
+
+  try {
+    const body = await api('/v1/admin/accounts', {
+      method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify(payload) });
+    if (body.login_id) { currentLogin = body.login_id; watchLogin(); }
+    else { $('acct-cookies').value = ''; loadAccounts(); alert('Account created'); }
+  } catch (e) { alert(e.message); }
+}
+
+function watchLogin() {
+  $('login-progress').classList.remove('hidden');
+  clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    try {
+      const status = await api(`/v1/admin/logins/${currentLogin}`);
+      $('login-step').textContent = `${status.status}${status.step ? ' — ' + status.step : ''}`;
+      $('otp-box').classList.toggle('hidden', status.status !== 'awaiting_otp');
+      if (status.status === 'done') {
+        clearInterval(pollTimer);
+        $('login-step').textContent = `Signed in — ${status.cookie_count} cookies stored`;
+        loadAccounts();
+      } else if (status.status === 'failed') {
+        clearInterval(pollTimer);
+        $('login-step').textContent = `Failed — ${status.message || 'unknown error'}`;
+      }
+    } catch (e) { clearInterval(pollTimer); $('login-step').textContent = e.message; }
+  }, 2000);
+}
+
+async function sendOtp() {
+  const code = $('otp-code').value.trim();
+  if (!code) return;
+  try {
+    await api(`/v1/admin/logins/${currentLogin}/otp`, {
+      method: 'POST', headers: {'content-type':'application/json'},
+      body: JSON.stringify({ code }) });
+    $('otp-code').value = '';
+    $('login-step').textContent = 'Code submitted…';
+  } catch (e) { alert(e.message); }
+}
+
+// --- config ---
+async function loadConfig() {
+  const config = await api('/v1/admin/config');
+  $('config-fields').innerHTML = config.editable.map(name => `
+    <div>
+      <label class="block text-xs text-slate-500 mb-1">${name}
+        ${config.overridden.includes(name) ? '<span class="text-blue-400">· overridden</span>' : ''}</label>
+      <input data-key="${name}" value="${config.effective[name]}"
+             class="field w-full rounded-lg px-3 py-2 text-slate-100">
+    </div>`).join('');
+}
+
+async function saveConfig() {
+  const values = {};
+  document.querySelectorAll('#config-fields input').forEach(i => { values[i.dataset.key] = i.value; });
+  try {
+    await api('/v1/admin/config', { method: 'PATCH',
+      headers: {'content-type':'application/json'}, body: JSON.stringify(values) });
+    $('config-msg').innerHTML = '<span class="text-emerald-400">Saved</span>';
+    loadConfig();
+  } catch (e) { $('config-msg').innerHTML = `<span class="text-red-300">${e.message}</span>`; }
+}
+
+// --- users ---
+async function loadUsers() {
+  const { users } = await api('/v1/admin/users');
+  $('users-body').innerHTML = users.map(u => `
+    <tr class="border-t border-slate-800">
+      <td class="px-4 py-2.5 text-slate-200">${u.email}${u.disabled ? ' <span class="text-red-400 text-xs">disabled</span>' : ''}</td>
+      <td class="px-4 py-2.5 text-slate-400">${u.role}</td>
+      <td class="px-4 py-2.5 text-slate-400">${u.lookups_used}</td>
+      <td class="px-4 py-2.5 text-slate-600 text-xs font-mono">${u.api_key_prefix || '–'}…</td>
+      <td class="px-4 py-2.5 text-right whitespace-nowrap">
+        <button onclick="patchUser('${u.id}', {disabled:${!u.disabled}})"
+                class="text-xs text-slate-400 hover:text-slate-200">${u.disabled ? 'enable' : 'disable'}</button>
+        ${u.role === 'user' ? `<button onclick="patchUser('${u.id}', {role:'superadmin'})"
+                class="ml-3 text-xs text-slate-400 hover:text-slate-200">make admin</button>` : ''}
+      </td>
+    </tr>`).join('');
+}
+
+async function patchUser(id, body) {
+  try { await api(`/v1/admin/users/${id}`, { method: 'PATCH',
+    headers: {'content-type':'application/json'}, body: JSON.stringify(body) });
+    loadUsers();
+  } catch (e) { alert(e.message); }
+}
+
+// --- stats ---
+async function loadStats() {
+  const [stats, health] = await Promise.all([api('/v1/admin/stats'), api('/health')]);
+  $('counters').innerHTML = Object.entries(stats.counters).map(([name, value]) => `
+    <div class="card rounded-xl p-4">
+      <div class="text-xs uppercase tracking-wide text-slate-500">${name.replace(/_/g,' ')}</div>
+      <div class="mt-1 text-xl font-semibold text-slate-100">${value}</div>
+    </div>`).join('');
+  $('health').textContent = JSON.stringify(health, null, 2);
+}
+
+showTab('accounts');
+</script>
+{% endblock %}

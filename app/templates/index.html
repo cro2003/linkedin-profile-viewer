@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="mb-8">
+  <h1 class="text-3xl font-semibold text-slate-100">LinkedIn profile lookup</h1>
+  <p class="mt-2 text-slate-400">Paste a profile URL and get structured JSON. Results are cached,
+     fetches are queued and throttled per account.</p>
+</div>
+
+<div class="card rounded-xl p-5">
+  <form id="lookup" class="flex flex-col sm:flex-row gap-3">
+    <input id="url" name="url" required
+           placeholder="https://www.linkedin.com/in/williamhgates/"
+           class="field flex-1 rounded-lg px-4 py-2.5 text-slate-100 placeholder:text-slate-600">
+    <label class="flex items-center gap-2 text-sm text-slate-400 px-1">
+      <input type="checkbox" id="refresh" class="rounded border-slate-600 bg-slate-900"> refresh
+    </label>
+    <button id="go" class="rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50
+                           px-5 py-2.5 font-medium text-white">Look up</button>
+  </form>
+  <div id="quota" class="mt-3 text-xs text-slate-500"></div>
+</div>
+
+<div id="progress" class="card rounded-xl p-5 mt-4 hidden">
+  <div class="text-sm font-medium text-slate-300 mb-3">Progress</div>
+  <ol id="steps" class="space-y-1.5 text-sm text-slate-400"></ol>
+</div>
+
+<div id="error" class="hidden mt-4 rounded-xl border border-red-900/60 bg-red-950/40 p-4 text-sm"></div>
+
+<div id="result" class="hidden mt-4"></div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+const $ = (id) => document.getElementById(id);
+let stream = null;
+
+const STATUS_LABEL = {
+  queued: 'Queued', waiting_for_account: 'Waiting for a free account',
+  fetching: 'Fetching from LinkedIn', refreshing_session: 'Refreshing session cookies',
+  parsing: 'Parsing profile', retrying: 'Upstream hiccup, retrying',
+  done: 'Done', failed: 'Failed', stream_timeout: 'Stream timed out',
+};
+
+async function loadQuota() {
+  try {
+    const q = await (await fetch('/v1/quota')).json();
+    $('quota').innerHTML = q.authenticated
+      ? `Signed in · ${q.lookups_used} lookups used · limit ${q.limit_per_min}/min`
+      : (q.free_remaining > 0
+          ? `${q.free_remaining} of ${q.free_total} free lookups left · <a href="/signup" class="text-blue-400 hover:text-blue-300">sign up</a> for more`
+          : `Free lookups used up · <a href="/signup" class="text-blue-400 hover:text-blue-300">create an account</a> to continue`);
+  } catch (e) { /* banner is cosmetic */ }
+}
+
+function showError(html) {
+  $('error').innerHTML = html;
+  $('error').classList.remove('hidden');
+}
+
+function addStep(status, extra) {
+  const li = document.createElement('li');
+  const label = STATUS_LABEL[status] || status;
+  const terminal = status === 'done' || status === 'failed';
+  li.className = terminal ? 'text-slate-200' : '';
+  li.innerHTML = `<span class="text-slate-600 mr-2">${terminal ? '●' : '○'}</span>${label}` +
+                 (extra ? ` <span class="text-slate-600">${extra}</span>` : '');
+  $('steps').appendChild(li);
+}
+
+function dateRange(range) {
+  if (!range) return '';
+  const fmt = (d) => d ? [d.month, d.year].filter(Boolean).join('/') : '';
+  const start = fmt(range.start), end = fmt(range.end);
+  if (!start && !end) return '';
+  return `${start || '?'} – ${end || 'Present'}`;
+}
+
+function renderProfile(payload) {
+  const d = payload.data, m = payload.meta;
+  const exp = (d.experience || []).map(j => `
+    <li class="flex gap-3 py-2.5 border-b border-slate-800 last:border-0">
+      ${j.company_logo ? `<img src="${j.company_logo}" class="w-9 h-9 rounded object-cover bg-slate-800" alt="">`
+                       : `<div class="w-9 h-9 rounded bg-slate-800"></div>`}
+      <div class="min-w-0">
+        <div class="text-slate-200">${j.title || ''}</div>
+        <div class="text-sm text-slate-400">${j.company || ''}${j.is_current ? ' · current' : ''}</div>
+        <div class="text-xs text-slate-600">${dateRange(j.date_range)}${j.location ? ' · ' + j.location : ''}</div>
+      </div>
+    </li>`).join('');
+
+  const edu = (d.education || []).map(e => `
+    <li class="py-2.5 border-b border-slate-800 last:border-0">
+      <div class="text-slate-200">${e.school || ''}</div>
+      <div class="text-sm text-slate-400">${[e.degree, e.field_of_study].filter(Boolean).join(', ')}</div>
+      <div class="text-xs text-slate-600">${dateRange(e.date_range)}</div>
+    </li>`).join('');
+
+  const missing = (m.unavailable_sections || []);
+
+  $('result').innerHTML = `
+    <div class="card rounded-xl p-5">
+      <div class="flex items-start gap-4">
+        ${d.profile_picture ? `<img src="${d.profile_picture}" class="w-16 h-16 rounded-full object-cover bg-slate-800" alt="">`
+                            : `<div class="w-16 h-16 rounded-full bg-slate-800"></div>`}
+        <div class="min-w-0 flex-1">
+          <h2 class="text-xl font-semibold text-slate-100">${d.full_name || d.public_id}</h2>
+          <p class="text-slate-300">${d.headline || ''}</p>
+          <p class="text-sm text-slate-500 mt-1">
+            ${[d.location, d.industry].filter(Boolean).join(' · ')}
+          </p>
+          <p class="text-xs text-slate-600 mt-2">
+            ${m.cache_hit ? 'served from cache' : 'freshly fetched'} ·
+            <a href="${d.url}" target="_blank" rel="noopener" class="text-blue-400 hover:text-blue-300">${d.public_id}</a>
+          </p>
+        </div>
+      </div>
+
+      ${exp ? `<div class="mt-6"><h3 class="text-sm font-medium text-slate-300 mb-1">Experience</h3><ul>${exp}</ul></div>` : ''}
+      ${edu ? `<div class="mt-6"><h3 class="text-sm font-medium text-slate-300 mb-1">Education</h3><ul>${edu}</ul></div>` : ''}
+
+      ${missing.length ? `<p class="mt-6 text-xs text-slate-600">
+          Not available upstream for this profile: ${missing.join(', ')}.</p>` : ''}
+
+      <details class="mt-6">
+        <summary class="cursor-pointer text-sm text-slate-400 hover:text-slate-200">Raw JSON</summary>
+        <pre class="mt-3 overflow-x-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-400">${
+          JSON.stringify(payload, null, 2).replace(/</g, '&lt;')}</pre>
+      </details>
+    </div>`;
+  $('result').classList.remove('hidden');
+}
+
+async function fetchResult(publicId) {
+  const r = await fetch(`/v1/profiles/${encodeURIComponent(publicId)}`);
+  if (r.ok) renderProfile(await r.json());
+  else showError('Fetched, but the profile could not be read back.');
+}
+
+function watch(job) {
+  if (stream) stream.close();
+  stream = new EventSource(`/v1/jobs/${encodeURIComponent(job.job_id)}/events`);
+  const seen = new Set();
+  stream.onmessage = async (event) => {
+    const data = JSON.parse(event.data);
+    if (data.final) {
+      stream.close();
+      $('go').disabled = false;
+      if (data.status === 'done') await fetchResult(job.public_id);
+      return;
+    }
+    const fingerprint = data.status + (data.attempts || '');
+    if (!seen.has(fingerprint)) { seen.add(fingerprint); addStep(data.status, data.account_id); }
+    if (data.status === 'failed') {
+      showError(`<div class="text-red-300">Lookup failed: ${
+        (data.error && data.error.message) || 'unknown error'}</div>`);
+    }
+  };
+  stream.onerror = () => { stream.close(); $('go').disabled = false; };
+}
+
+$('lookup').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('go').disabled = true;
+  $('error').classList.add('hidden');
+  $('result').classList.add('hidden');
+  $('steps').innerHTML = '';
+  $('progress').classList.add('hidden');
+
+  try {
+    const response = await fetch('/v1/profiles', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: $('url').value.trim(), refresh: $('refresh').checked }),
+    });
+    const body = await response.json();
+
+    if (response.status === 200) { renderProfile(body); $('go').disabled = false; }
+    else if (response.status === 202) { $('progress').classList.remove('hidden'); addStep(body.status); watch(body); }
+    else if (response.status === 402) {
+      showError(`<div class="text-red-200">${body.error.message}</div>
+                 <a href="/signup" class="inline-block mt-2 rounded-md bg-blue-600 hover:bg-blue-500 px-3 py-1.5 text-white">Create an account</a>`);
+      $('go').disabled = false;
+    }
+    else if (response.status === 429) {
+      showError(`<div class="text-red-200">Rate limited. Try again in ${body.error.retry_after || 60}s.</div>`);
+      $('go').disabled = false;
+    }
+    else {
+      showError(`<div class="text-red-200">${(body.error && body.error.message) || 'Request failed'}</div>`);
+      $('go').disabled = false;
+    }
+  } catch (err) {
+    showError('<div class="text-red-200">Network error.</div>');
+    $('go').disabled = false;
+  } finally {
+    loadQuota();
+  }
+});
+
+loadQuota();
+</script>
+{% endblock %}

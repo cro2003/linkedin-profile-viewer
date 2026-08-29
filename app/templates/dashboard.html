@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · Profile API{% endblock %}
+{% block content %}
+
+<h1 class="text-2xl font-semibold text-slate-100 mb-6">Dashboard</h1>
+
+<div class="grid gap-4 sm:grid-cols-3">
+  <div class="card rounded-xl p-5">
+    <div class="text-xs uppercase tracking-wide text-slate-500">Lookups used</div>
+    <div id="used" class="mt-1 text-2xl font-semibold text-slate-100">–</div>
+  </div>
+  <div class="card rounded-xl p-5">
+    <div class="text-xs uppercase tracking-wide text-slate-500">Write limit</div>
+    <div id="limit" class="mt-1 text-2xl font-semibold text-slate-100">–</div>
+    <div class="text-xs text-slate-600">requests / minute</div>
+  </div>
+  <div class="card rounded-xl p-5">
+    <div class="text-xs uppercase tracking-wide text-slate-500">Account</div>
+    <div class="mt-1 text-sm text-slate-200">{{ user.email }}</div>
+    <div class="text-xs text-slate-600">{{ user.role }}</div>
+  </div>
+</div>
+
+<div class="card rounded-xl p-5 mt-4">
+  <div class="flex items-start justify-between gap-4">
+    <div>
+      <h2 class="font-medium text-slate-100">API key</h2>
+      <p class="text-sm text-slate-400 mt-1">
+        Keys are stored hashed, so only the prefix is shown. Regenerate to get a new one —
+        this invalidates the old key immediately.
+      </p>
+      <pre id="prefix" class="mt-3 rounded-lg bg-slate-950 px-3 py-2 text-xs text-slate-400">{{ user.api_key_prefix }}…</pre>
+    </div>
+    <button onclick="regenerate()" class="shrink-0 rounded-lg border border-slate-700
+            hover:border-slate-500 px-3 py-2 text-sm text-slate-300">Regenerate</button>
+  </div>
+  <div id="newkey" class="hidden mt-4 rounded-lg border border-blue-900/60 bg-blue-950/30 p-4">
+    <div class="text-sm text-slate-200">New key — copy it now, it will not be shown again.</div>
+    <pre id="newkeyvalue" class="mt-2 overflow-x-auto rounded bg-slate-950 p-3 text-xs text-blue-300"></pre>
+  </div>
+</div>
+
+<div class="card rounded-xl p-5 mt-4">
+  <h2 class="font-medium text-slate-100">Using the API</h2>
+  <pre class="mt-3 overflow-x-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-400">curl -X POST {{ request.base_url }}v1/profiles \
+  -H "X-API-Key: YOUR_KEY" \
+  -H "content-type: application/json" \
+  -d '{"url":"https://www.linkedin.com/in/williamhgates/"}'</pre>
+  <p class="mt-3 text-sm text-slate-400">
+    A cache hit returns <code class="text-slate-300">200</code> with the profile. A miss returns
+    <code class="text-slate-300">202</code> with a <code class="text-slate-300">job_id</code>; poll
+    <code class="text-slate-300">/v1/jobs/{id}</code> or stream
+    <code class="text-slate-300">/v1/jobs/{id}/events</code>.
+  </p>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+async function load() {
+  const q = await (await fetch('/v1/quota')).json();
+  document.getElementById('used').textContent = q.lookups_used ?? 0;
+  document.getElementById('limit').textContent = q.limit_per_min ?? '–';
+}
+async function regenerate() {
+  if (!confirm('Regenerate the API key? The current key stops working immediately.')) return;
+  const body = await (await fetch('/v1/me/api-key', { method: 'POST' })).json();
+  if (body.api_key) {
+    document.getElementById('newkeyvalue').textContent = body.api_key;
+    document.getElementById('newkey').classList.remove('hidden');
+    document.getElementById('prefix').textContent = body.api_key.slice(0, 12) + '…';
+  }
+}
+load();
+</script>
+{% endblock %}

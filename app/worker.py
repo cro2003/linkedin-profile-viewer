@@ -15,7 +15,7 @@ import logging
 from arq import Retry
 from arq.connections import RedisSettings
 
-from app import accounts, metrics, pool, session, store
+from app import accounts, logins, metrics, pool, runtime, session, store
 from app.config import settings
 from app.db import redis
 from app.linkedin.client import (
@@ -58,6 +58,8 @@ async def _lease_with_wait(job_id: str) -> "pool.Account":
 
 
 async def fetch_profile_job(ctx: dict, public_id: str, force_refresh: bool = False) -> dict:
+    # picks up admin config changes without a redeploy
+    await runtime.apply_stored()
     job_id = job_id_for(public_id)
     attempt = ctx.get("job_try", 1)
 
@@ -134,17 +136,40 @@ async def fetch_profile_job(ctx: dict, public_id: str, force_refresh: bool = Fal
         await pool.release(account.id, cookies=cookies_to_persist)
 
 
+async def add_account_job(ctx: dict, login_id: str, account_id: str, email: str,
+                          password: str, proxy_url: str | None = None,
+                          note: str | None = None) -> dict:
+    """Sign in and store the harvested jar. The password is used here and never
+    persisted; only cookies are kept."""
+    try:
+        cookies = await session.login_and_harvest(account_id, email, password,
+                                                  proxy_url, login_id)
+        await accounts.create(account_id, cookies, proxy_url=proxy_url, email=email,
+                              note=note or "added via admin login")
+        await pool.set_status(account_id, pool.LIVE)
+        await logins.set_status(login_id, logins.DONE, account_id=account_id,
+                                cookie_count=len(cookies))
+        log.info("account %s added with %d cookies", account_id, len(cookies))
+        return {"account_id": account_id, "status": "done"}
+    except Exception as e:
+        log.error("adding account %s failed: %s", account_id, e)
+        await logins.set_status(login_id, logins.FAILED, account_id=account_id,
+                                message=str(e)[:300])
+        return {"account_id": account_id, "status": "failed"}
+
+
 async def startup(ctx: dict) -> None:
     logging.basicConfig(level=settings.log_level,
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
     await accounts.seed_from_env()
     await accounts.ensure_indexes()
     await store.ensure_indexes()
+    await runtime.apply_stored()
     log.info("worker ready with %d usable account(s)", len(await accounts.list_accounts()))
 
 
 class WorkerSettings:
-    functions = [fetch_profile_job]
+    functions = [fetch_profile_job, add_account_job]
     on_startup = startup
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
     # one more than our own guard, so the job's terminal state is always published

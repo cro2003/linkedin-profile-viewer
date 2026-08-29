@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     browser_profile_dir: str = "/data/browser"
     browser_headless: bool = True
     cookie_refresh_timeout_sec: float = 90
+    # how long an admin has to supply a verification code before the attempt is dropped
+    otp_wait_sec: int = 600
     cache_ttl_hours: int = 24
     negative_cache_ttl_hours: int = 1
     request_timeout_sec: float = 30

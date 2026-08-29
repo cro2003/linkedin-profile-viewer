@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}LinkedIn Profile API{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root { color-scheme: dark; }
+    body { background: #0b0f16; }
+    .card { background:#121821; border:1px solid #1f2937; }
+    .field { background:#0b0f16; border:1px solid #243044; }
+    .field:focus { outline:none; border-color:#3b82f6; }
+    pre { tab-size: 2; }
+  </style>
+</head>
+<body class="h-full text-slate-200 antialiased">
+<nav class="border-b border-slate-800">
+  <div class="mx-auto max-w-5xl px-5 h-14 flex items-center justify-between">
+    <a href="/" class="flex items-center gap-2 font-semibold text-slate-100">
+      <span class="inline-block w-2.5 h-2.5 rounded-sm bg-blue-500"></span>
+      Profile API
+    </a>
+    <div class="flex items-center gap-4 text-sm">
+      <a href="/docs" class="text-slate-400 hover:text-slate-200">API docs</a>
+      {% if user %}
+        {% if user.role == 'superadmin' %}
+          <a href="/admin" class="text-slate-400 hover:text-slate-200">Admin</a>
+        {% endif %}
+        <a href="/dashboard" class="text-slate-400 hover:text-slate-200">Dashboard</a>
+        <button onclick="logout()" class="text-slate-400 hover:text-slate-200">Sign out</button>
+      {% else %}
+        <a href="/login" class="text-slate-400 hover:text-slate-200">Sign in</a>
+        <a href="/signup" class="rounded-md bg-blue-600 hover:bg-blue-500 px-3 py-1.5 font-medium text-white">Sign up</a>
+      {% endif %}
+    </div>
+  </div>
+</nav>
+
+<main class="mx-auto max-w-5xl px-5 py-10">
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="mx-auto max-w-5xl px-5 py-10 text-xs text-slate-600">
+  Reverse-engineered LinkedIn profile API · cached, queued, rate limited
+</footer>
+
+<script>
+async function logout() {
+  await fetch('/v1/auth/logout', { method: 'POST' });
+  location.href = '/';
+}
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
