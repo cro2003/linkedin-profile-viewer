@@ -15,7 +15,7 @@ import logging
 from arq import Retry
 from arq.connections import RedisSettings
 
-from app import pool, session, store
+from app import metrics, pool, session, store
 from app.config import settings
 from app.db import redis
 from app.linkedin.client import (
@@ -77,6 +77,7 @@ async def fetch_profile_job(ctx: dict, public_id: str, force_refresh: bool = Fal
                 payload = await client.fetch_profile(public_id)
             except SessionExpired as e:
                 log.warning("session expired on %s (%s), re-minting", account.id, e)
+                await metrics.incr("session_refreshes")
                 await publish(job_id, "refreshing_session", account_id=account.id)
                 fresh = await session.refresh(account)
                 account.cookies = fresh
@@ -89,17 +90,21 @@ async def fetch_profile_job(ctx: dict, public_id: str, force_refresh: bool = Fal
         await publish(job_id, "parsing")
         profile, unavailable, partial = parse_profile(payload, public_id)
         await store.save_profile(profile, payload, unavailable, partial, account.id)
+        await metrics.incr("fetches")
         await publish(job_id, "done", cache_hit=False, account_id=account.id)
         return {"public_id": public_id, "cache_hit": False}
 
     except (PermanentError, ProfileNotInPayload) as e:
         code = getattr(e, "code", "profile_not_found")
+        await metrics.incr("failures")
         await store.save_negative(public_id, code, str(e))
         await publish(job_id, "failed", error={"code": code, "message": str(e)})
         return {"public_id": public_id, "error": code}
 
     except session.LoginCheckpointRequired as e:
         # not retryable by definition; surface it so an operator can act
+        await metrics.incr("checkpoints")
+        await metrics.incr("failures")
         await publish(job_id, "failed",
                       error={"code": "account_needs_login", "message": str(e)})
         return {"public_id": public_id, "error": "account_needs_login"}
@@ -109,6 +114,7 @@ async def fetch_profile_job(ctx: dict, public_id: str, force_refresh: bool = Fal
             await publish(job_id, "failed",
                           error={"code": "upstream_unavailable", "message": str(e)})
             return {"public_id": public_id, "error": "upstream_unavailable"}
+        await metrics.incr("retries")
         await publish(job_id, "retrying", error={"message": str(e)}, attempts=attempt)
         raise Retry(defer=min(60, 2 ** attempt * 5))
 

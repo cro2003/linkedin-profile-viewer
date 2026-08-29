@@ -1,14 +1,17 @@
+import asyncio
+import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from arq import create_pool
 from arq.connections import RedisSettings
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from app import pool, store
+from app import metrics, pool, ratelimit, store
 from app.config import settings
 from app.db import mongo, redis
 from app.models import Meta, Profile, ProfileResponse
@@ -39,18 +42,25 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="LinkedIn Profile API", version="0.2.0", lifespan=lifespan)
 
 
-def error_response(status: int, code: str, message: str, retryable: bool = False):
-    return JSONResponse(status_code=status,
-                        content={"error": {"code": code, "message": message,
-                                           "retryable": retryable}})
+def error_response(status: int, code: str, message: str, retryable: bool = False,
+                   retry_after: int | None = None):
+    body = {"code": code, "message": message, "retryable": retryable}
+    if retry_after:
+        body["retry_after"] = retry_after
+    return JSONResponse(status_code=status, content={"error": body})
 
 
 @app.exception_handler(HTTPException)
 async def http_error(request, exc: HTTPException):
     detail = exc.detail if isinstance(exc.detail, dict) else {"code": "error",
                                                               "message": str(exc.detail)}
-    return error_response(exc.status_code, detail.get("code", "error"),
-                          detail.get("message", ""), detail.get("retryable", False))
+    retry_after = detail.get("retry_after")
+    response = error_response(exc.status_code, detail.get("code", "error"),
+                              detail.get("message", ""), detail.get("retryable", False),
+                              retry_after)
+    if retry_after:
+        response.headers["Retry-After"] = str(retry_after)
+    return response
 
 
 async def require_api_key(x_api_key: str | None = Header(default=None)):
@@ -59,6 +69,16 @@ async def require_api_key(x_api_key: str | None = Header(default=None)):
         return
     if x_api_key not in settings.api_keys:
         raise HTTPException(401, {"code": "unauthorized", "message": "valid X-API-Key required"})
+
+
+async def limit_writes(request: Request, x_api_key: str | None = Header(default=None)):
+    identity = ratelimit.client_identity(request, x_api_key)
+    await ratelimit.check(identity, "write", settings.rate_limit_write_per_min, 60)
+
+
+async def limit_reads(request: Request, x_api_key: str | None = Header(default=None)):
+    identity = ratelimit.client_identity(request, x_api_key)
+    await ratelimit.check(identity, "read", settings.rate_limit_read_per_min, 60)
 
 
 class ProfileRequest(BaseModel):
@@ -99,7 +119,8 @@ def _job_view(doc: dict) -> dict:
     }
 
 
-@app.post("/v1/profiles", dependencies=[Depends(require_api_key)])
+@app.post("/v1/profiles",
+          dependencies=[Depends(require_api_key), Depends(limit_writes)])
 async def create_profile_request(body: ProfileRequest, request: Request):
     """Cache hit returns the profile directly; a miss queues a job and returns 202."""
     try:
@@ -107,12 +128,16 @@ async def create_profile_request(body: ProfileRequest, request: Request):
     except InvalidProfileURL as e:
         raise HTTPException(422, {"code": "invalid_url", "message": str(e)})
 
+    await metrics.incr("requests")
+
     if not body.refresh:
         cached = await store.get_cached(public_id)
         if cached and cached.get("error"):
+            await metrics.incr("negative_hits")
             err = cached["error"]
             raise HTTPException(404, {"code": err["code"], "message": err["message"]})
         if cached:
+            await metrics.incr("cache_hits")
             return _response_from_doc(cached, cache_hit=True).model_dump(mode="json")
 
     if not settings.linkedin_accounts:
@@ -134,6 +159,7 @@ async def create_profile_request(body: ProfileRequest, request: Request):
         status = existing["status"] if existing else "in_progress"
     else:
         await store.create_job(job_id, public_id)
+        await metrics.incr("jobs_queued")
         status = "queued"
 
     return JSONResponse(status_code=202, content={
@@ -145,7 +171,64 @@ async def create_profile_request(body: ProfileRequest, request: Request):
     })
 
 
-@app.get("/v1/jobs/{job_id:path}", dependencies=[Depends(require_api_key)])
+@app.get("/v1/jobs/{job_id:path}/events",
+         dependencies=[Depends(require_api_key), Depends(limit_reads)])
+async def stream_job_events(job_id: str, request: Request):
+    """Server-sent events for one job.
+
+    Stored events replay first so a subscriber that connects late still sees the
+    whole history, then live updates arrive over pubsub. Polling /v1/jobs/{id}
+    remains available for clients that cannot hold a stream open.
+    """
+    doc = await store.get_job(job_id)
+    if not doc:
+        raise HTTPException(404, {"code": "job_not_found", "message": f"no job {job_id}"})
+
+    async def stream():
+        seen = 0
+        replay = await store.get_job(job_id)
+        for event in (replay or {}).get("events", []):
+            seen += 1
+            yield _sse({"status": event["status"], "at": _utc(event["at"]).isoformat(),
+                        "replay": True})
+        if replay and replay["status"] in TERMINAL:
+            yield _sse({"status": replay["status"], "final": True})
+            return
+
+        pubsub = redis.pubsub()
+        await pubsub.subscribe(f"job:{job_id}")
+        started = last_beat = time.time()
+        try:
+            while True:
+                if await request.is_disconnected():
+                    return
+                if time.time() - started > settings.sse_max_duration_sec:
+                    yield _sse({"status": "stream_timeout", "final": True})
+                    return
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if message:
+                    payload = json.loads(message["data"])
+                    yield _sse(payload)
+                    if payload.get("status") in TERMINAL:
+                        yield _sse({"status": payload["status"], "final": True})
+                        return
+                elif time.time() - last_beat > 15:
+                    # keeps idle proxies from closing the connection
+                    yield ": heartbeat\n\n"
+                    last_beat = time.time()
+        finally:
+            await pubsub.unsubscribe(f"job:{job_id}")
+            await pubsub.close()
+
+    return StreamingResponse(stream(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",  # stops proxies buffering the stream
+    })
+
+
+@app.get("/v1/jobs/{job_id:path}",
+         dependencies=[Depends(require_api_key), Depends(limit_reads)])
 async def read_job(job_id: str):
     doc = await store.get_job(job_id)
     if not doc:
@@ -154,7 +237,7 @@ async def read_job(job_id: str):
 
 
 @app.get("/v1/profiles/{public_id}", response_model=ProfileResponse,
-         dependencies=[Depends(require_api_key)])
+         dependencies=[Depends(require_api_key), Depends(limit_reads)])
 async def read_cached_profile(public_id: str,
                               allow_stale: bool = Query(True, description="serve past TTL")):
     doc = await store.get_any(public_id) if allow_stale else await store.get_cached(public_id)
@@ -162,6 +245,15 @@ async def read_cached_profile(public_id: str,
         raise HTTPException(404, {"code": "not_cached",
                                   "message": f"no cached profile for {public_id}"})
     return _response_from_doc(doc, cache_hit=True)
+
+
+def _sse(payload: dict) -> str:
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+@app.get("/v1/stats", dependencies=[Depends(require_api_key)])
+async def read_stats():
+    return {"counters": await metrics.snapshot(), "accounts": await pool.snapshot()}
 
 
 @app.get("/health")

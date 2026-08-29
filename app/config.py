@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     account_min_delay_sec: float = 8
     account_max_delay_sec: float = 20
     proxy_required: bool = False
+    # inbound limits: writes may cost an upstream fetch, reads are cheap
+    rate_limit_write_per_min: int = 10
+    rate_limit_read_per_min: int = 60
+    trust_proxy_headers: bool = False
+    sse_max_duration_sec: int = 300
     browser_profile_dir: str = "/data/browser"
     browser_headless: bool = True
     cookie_refresh_timeout_sec: float = 90
