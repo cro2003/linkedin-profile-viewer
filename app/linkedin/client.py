@@ -22,8 +22,10 @@ PROFILE_PATH = "/identity/dash/profiles"
 SESSION_PROBE_PATH = "/me"
 PROFILE_DECORATION = "com.linkedin.voyager.dash.deco.identity.profile.FullProfileWithEntities-91"
 
-UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36")
+UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+)
 
 # a self-redirect loop means a stale jar, so fail fast instead of grinding
 MAX_REDIRECTS = 3
@@ -51,11 +53,13 @@ class IdentityMismatch(PermanentError):
     some other profile. Serving that would hand the caller the wrong person's data,
     so it is refused rather than cached.
     """
+
     code = "profile_identity_mismatch"
 
 
 class SessionExpired(FetchError):
     """Cookies no longer work; retry the job on a different account."""
+
     retryable = True
     account_dead = True
     code = "session_expired"
@@ -67,8 +71,9 @@ def headers_for(account: Account) -> dict[str, str]:
         "accept": "application/vnd.linkedin.normalized+json+2.1",
         "x-restli-protocol-version": "2.0.0",
         "x-li-lang": "en_US",
-        "x-li-track": json.dumps({"clientVersion": "1.13.0", "osName": "web",
-                                  "timezone": "Asia/Kolkata"}),
+        "x-li-track": json.dumps(
+            {"clientVersion": "1.13.0", "osName": "web", "timezone": "Asia/Kolkata"}
+        ),
         "user-agent": UA,
         "referer": "https://www.linkedin.com/feed/",
         "sec-ch-ua": '"Not=A?Brand";v="99", "Google Chrome";v="151", "Chromium";v="151"',
@@ -144,8 +149,11 @@ class ProfileClient:
             return await self._client.get(url)
         except (httpx.ProxyError, httpx.ConnectError) as e:
             if self.account.proxy_url and not self._proxy_disabled and not settings.proxy_required:
-                log.warning("proxy failed for %s (%s), falling back to direct",
-                            self.account.id, type(e).__name__)
+                log.warning(
+                    "proxy failed for %s (%s), falling back to direct",
+                    self.account.id,
+                    type(e).__name__,
+                )
                 self._proxy_disabled = True
                 await self._client.aclose()
                 self._client = self._build()
@@ -165,8 +173,10 @@ class ProfileClient:
         return r.status_code == 200
 
     async def fetch_profile(self, public_id: str) -> dict:
-        url = (f"{API_BASE}{PROFILE_PATH}?q=memberIdentity"
-               f"&memberIdentity={public_id}&decorationId={PROFILE_DECORATION}")
+        url = (
+            f"{API_BASE}{PROFILE_PATH}?q=memberIdentity"
+            f"&memberIdentity={public_id}&decorationId={PROFILE_DECORATION}"
+        )
         r = await self._get(url)
 
         if r.status_code == 403:
@@ -185,14 +195,19 @@ class ProfileClient:
             # a 200 that is not JSON means we were handed a login/authwall page
             raise SessionExpired("200 but body is not JSON") from e
 
-        entity = next((e for e in payload.get("included", [])
-                       if e.get("$type", "").endswith("identity.profile.Profile")
-                       and e.get("publicIdentifier")), None)
+        entity = next(
+            (
+                e
+                for e in payload.get("included", [])
+                if e.get("$type", "").endswith("identity.profile.Profile")
+                and e.get("publicIdentifier")
+            ),
+            None,
+        )
         if entity is None:
             raise PermanentError(f"no profile in payload for {public_id}")
 
         returned = entity["publicIdentifier"]
         if returned.casefold() != public_id.casefold():
-            raise IdentityMismatch(
-                f"asked for {public_id!r}, upstream returned {returned!r}")
+            raise IdentityMismatch(f"asked for {public_id!r}, upstream returned {returned!r}")
         return payload

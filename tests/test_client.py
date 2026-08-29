@@ -15,13 +15,15 @@ from app.linkedin.client import (
 ACCOUNT = Account(id="test", cookies={"li_at": "x", "JSESSIONID": "ajax:y"})
 
 PROFILE_PAYLOAD = {
-    "included": [{
-        "entityUrn": "urn:li:fsd_profile:AAA",
-        "$type": "com.linkedin.voyager.dash.identity.profile.Profile",
-        "publicIdentifier": "someone",
-        "firstName": "Some",
-        "lastName": "One",
-    }]
+    "included": [
+        {
+            "entityUrn": "urn:li:fsd_profile:AAA",
+            "$type": "com.linkedin.voyager.dash.identity.profile.Profile",
+            "publicIdentifier": "someone",
+            "firstName": "Some",
+            "lastName": "One",
+        }
+    ]
 }
 
 
@@ -30,6 +32,7 @@ def _transport(profile_status, profile_json=None, probe_status=200):
         if request.url.path.endswith("/me"):
             return httpx.Response(probe_status, json={})
         return httpx.Response(profile_status, json=profile_json or {})
+
     return httpx.MockTransport(handler)
 
 
@@ -83,16 +86,21 @@ async def test_transient_statuses_are_retryable():
 
 
 def _identity_transport(returned_id):
-    payload = {"included": [{
-        "entityUrn": "urn:li:fsd_profile:BBB",
-        "$type": "com.linkedin.voyager.dash.identity.profile.Profile",
-        "publicIdentifier": returned_id,
-        "firstName": "Someone",
-        "lastName": "Else",
-    }]}
+    payload = {
+        "included": [
+            {
+                "entityUrn": "urn:li:fsd_profile:BBB",
+                "$type": "com.linkedin.voyager.dash.identity.profile.Profile",
+                "publicIdentifier": returned_id,
+                "firstName": "Someone",
+                "lastName": "Else",
+            }
+        ]
+    }
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=payload)
+
     return httpx.MockTransport(handler)
 
 
@@ -113,9 +121,13 @@ async def test_identity_comparison_ignores_case():
 
 async def test_persisted_jar_keeps_seeded_cookies():
     """Regression: a domain filter dropped seeded cookies and wiped the session."""
+
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=PROFILE_PAYLOAD,
-                              headers={"set-cookie": "__cf_bm=abc; Domain=.linkedin.com; Path=/"})
+        return httpx.Response(
+            200,
+            json=PROFILE_PAYLOAD,
+            headers={"set-cookie": "__cf_bm=abc; Domain=.linkedin.com; Path=/"},
+        )
 
     async with ProfileClient(ACCOUNT, transport=httpx.MockTransport(handler)) as c:
         await c.fetch_profile("someone")

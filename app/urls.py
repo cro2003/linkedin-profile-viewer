@@ -8,8 +8,19 @@ from urllib.parse import unquote, urlparse
 _PROFILE_RE = re.compile(r"^/(?:[a-z]{2}(?:-[a-z]{2})?/)?in/([^/?#]+)", re.I)
 _VALID_ID = re.compile(r"^[\w\-%.À-￿]{2,150}$", re.U)
 
-_REJECT_PATHS = ("company", "school", "posts", "feed", "jobs", "groups",
-                 "showcase", "pub/dir", "learning", "events", "newsletters")
+_REJECT_PATHS = (
+    "company",
+    "school",
+    "posts",
+    "feed",
+    "jobs",
+    "groups",
+    "showcase",
+    "pub/dir",
+    "learning",
+    "events",
+    "newsletters",
+)
 
 
 class InvalidProfileURL(ValueError):

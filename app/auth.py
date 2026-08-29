@@ -11,7 +11,7 @@ import logging
 import os
 import re
 import secrets
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import Cookie, Depends, Header, HTTPException, Request
 
@@ -26,21 +26,23 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 MIN_PASSWORD_LENGTH = 8
 
 # scrypt parameters: interactive-login cost, not batch-hashing cost
-SCRYPT_N, SCRYPT_R, SCRYPT_P = 2 ** 14, 8, 1
+SCRYPT_N, SCRYPT_R, SCRYPT_P = 2**14, 8, 1
 
 ROLE_USER, ROLE_SUPERADMIN = "user", "superadmin"
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # --- passwords ---
 
+
 def hash_password(password: str, salt: bytes | None = None) -> tuple[str, str]:
     salt = salt or os.urandom(16)
-    digest = hashlib.scrypt(password.encode(), salt=salt, n=SCRYPT_N, r=SCRYPT_R,
-                            p=SCRYPT_P, dklen=32)
+    digest = hashlib.scrypt(
+        password.encode(), salt=salt, n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P, dklen=32
+    )
     return digest.hex(), salt.hex()
 
 
@@ -50,6 +52,7 @@ def verify_password(password: str, password_hash: str, salt_hex: str) -> bool:
 
 
 # --- api keys ---
+
 
 def new_api_key() -> tuple[str, str, str]:
     """Returns (plaintext, hash, prefix). Only the hash and prefix are stored."""
@@ -63,6 +66,7 @@ def hash_api_key(key: str) -> str:
 
 # --- users ---
 
+
 async def ensure_indexes() -> None:
     await users.create_index("email", unique=True)
     await users.create_index("api_key_hash")
@@ -73,9 +77,13 @@ def validate_credentials(email: str, password: str) -> str:
     if not EMAIL_RE.match(email):
         raise HTTPException(422, {"code": "invalid_email", "message": "a valid email is required"})
     if len(password or "") < MIN_PASSWORD_LENGTH:
-        raise HTTPException(422, {
-            "code": "weak_password",
-            "message": f"password must be at least {MIN_PASSWORD_LENGTH} characters"})
+        raise HTTPException(
+            422,
+            {
+                "code": "weak_password",
+                "message": f"password must be at least {MIN_PASSWORD_LENGTH} characters",
+            },
+        )
     return email
 
 
@@ -108,8 +116,9 @@ async def authenticate(email: str, password: str) -> dict:
     user = await users.find_one({"email": (email or "").strip().lower()})
     if not user or not verify_password(password, user["password_hash"], user["salt"]):
         # same response either way, so the endpoint cannot be used to enumerate emails
-        raise HTTPException(401, {"code": "invalid_credentials",
-                                  "message": "email or password is incorrect"})
+        raise HTTPException(
+            401, {"code": "invalid_credentials", "message": "email or password is incorrect"}
+        )
     if user.get("disabled"):
         raise HTTPException(403, {"code": "account_disabled", "message": "account is disabled"})
     return user
@@ -117,9 +126,16 @@ async def authenticate(email: str, password: str) -> dict:
 
 async def regenerate_api_key(user_id: str) -> str:
     key, key_hash, prefix = new_api_key()
-    await users.update_one({"_id": user_id},
-                           {"$set": {"api_key_hash": key_hash, "api_key_prefix": prefix,
-                                     "api_key_created_at": _now()}})
+    await users.update_one(
+        {"_id": user_id},
+        {
+            "$set": {
+                "api_key_hash": key_hash,
+                "api_key_prefix": prefix,
+                "api_key_created_at": _now(),
+            }
+        },
+    )
     return key
 
 
@@ -137,6 +153,7 @@ async def bootstrap_superadmin() -> None:
 
 
 # --- sessions ---
+
 
 async def start_session(user_id: str) -> str:
     token = secrets.token_urlsafe(32)
@@ -159,11 +176,12 @@ async def user_for_api_key(key: str) -> dict | None:
 
 # --- callers ---
 
+
 class Caller:
     """Who is making this request, and how it should be metered."""
 
     def __init__(self, kind: str, user: dict | None = None, identity: str = "anon"):
-        self.kind = kind          # user | env_key | anon
+        self.kind = kind  # user | env_key | anon
         self.user = user
         self.identity = identity  # rate-limit bucket key
 
@@ -225,6 +243,7 @@ async def require_superadmin(caller: Caller = Depends(resolve_caller)) -> Caller
 
 # --- anonymous quota ---
 
+
 async def anon_usage(anon_id: str, ip: str) -> tuple[int, int]:
     used_browser, used_ip = await redis.mget([f"anon:{anon_id}", f"anonip:{ip}"])
     return int(used_browser or 0), int(used_ip or 0)
@@ -234,12 +253,15 @@ async def check_anon_quota(anon_id: str, ip: str) -> int:
     """Returns remaining free lookups, or raises once the quota is spent."""
     used_browser, used_ip = await anon_usage(anon_id, ip)
     if used_browser >= settings.anon_free_lookups or used_ip >= settings.anon_ip_lookups:
-        raise HTTPException(402, {
-            "code": "signup_required",
-            "message": f"free limit of {settings.anon_free_lookups} lookups reached, "
-                       f"create an account to continue",
-            "retryable": False,
-        })
+        raise HTTPException(
+            402,
+            {
+                "code": "signup_required",
+                "message": f"free limit of {settings.anon_free_lookups} lookups reached, "
+                f"create an account to continue",
+                "retryable": False,
+            },
+        )
     return settings.anon_free_lookups - used_browser
 
 

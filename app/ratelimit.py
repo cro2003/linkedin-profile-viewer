@@ -54,12 +54,15 @@ async def check(identity: str, bucket: str, limit: int, window_sec: int) -> tupl
         oldest = await redis.zrange(key, 0, 0, withscores=True)
         retry_after = max(1, int(window_sec - (now - oldest[0][1]))) if oldest else window_sec
         await metrics.incr("rate_limited")
-        raise HTTPException(429, {
-            "code": "rate_limited",
-            "message": f"{limit} requests per {window_sec}s exceeded",
-            "retryable": True,
-            "retry_after": retry_after,
-        })
+        raise HTTPException(
+            429,
+            {
+                "code": "rate_limited",
+                "message": f"{limit} requests per {window_sec}s exceeded",
+                "retryable": True,
+                "retry_after": retry_after,
+            },
+        )
 
     await redis.zadd(key, {f"{now}:{secrets.token_hex(4)}": now})
     return limit - used - 1, 0

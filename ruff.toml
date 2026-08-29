@@ -1,0 +1,12 @@
+line-length = 100
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+  "B008",    # FastAPI dependencies are function calls in defaults by design
+  "SIM105",  # contextlib.suppress is not clearer for the one-line metrics guard
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["S101"]

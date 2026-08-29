@@ -1,0 +1,28 @@
+# Overlay for our VM, where Traefik already runs on the external `proxy` network.
+#   docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d --build
+#
+# Only the API is published. The worker, Mongo and Redis stay on the internal
+# network with no route in from outside.
+services:
+  api:
+    ports: !reset []
+    environment:
+      COOKIE_SECURE: "true"
+      # Correct ONLY behind Traefik, which sets X-Forwarded-For itself. Enabled
+      # without a trusted proxy in front, any caller could forge the header and
+      # reset their free-lookup quota at will.
+      TRUST_PROXY_HEADERS: "true"
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=proxy
+      - traefik.http.routers.lpg.rule=Host(`${LPG_DOMAIN}`)
+      - traefik.http.routers.lpg.entrypoints=websecure
+      - traefik.http.routers.lpg.tls.certresolver=le
+      - traefik.http.services.lpg.loadbalancer.server.port=8000
+    networks:
+      - default
+      - proxy
+
+networks:
+  proxy:
+    external: true

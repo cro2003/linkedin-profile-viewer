@@ -50,8 +50,9 @@ def test_rejects_short_password():
 
 
 def test_email_is_normalised():
-    assert auth.validate_credentials("  User@Example.COM ", "longenoughpassword") == \
-        "user@example.com"
+    assert (
+        auth.validate_credentials("  User@Example.COM ", "longenoughpassword") == "user@example.com"
+    )
 
 
 class FakeRedis:

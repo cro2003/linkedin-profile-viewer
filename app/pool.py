@@ -80,13 +80,15 @@ async def snapshot() -> list[dict]:
     now = time.time()
     for doc in await accounts.list_docs():
         next_ok = await redis.get(_k(doc["id"], "next_ok_at"))
-        out.append({
-            "id": doc["id"],
-            "status": "disabled" if doc["disabled"] else await get_status(doc["id"]),
-            "busy": bool(await redis.exists(_k(doc["id"], "lock"))),
-            "cooldown_sec": max(0, round(float(next_ok) - now, 1)) if next_ok else 0,
-            "has_cookies": doc["cookie_count"] > 0,
-            "proxy": bool(doc["proxy_url"]),
-            "last_used_at": doc["last_used_at"].isoformat() if doc["last_used_at"] else None,
-        })
+        out.append(
+            {
+                "id": doc["id"],
+                "status": "disabled" if doc["disabled"] else await get_status(doc["id"]),
+                "busy": bool(await redis.exists(_k(doc["id"], "lock"))),
+                "cooldown_sec": max(0, round(float(next_ok) - now, 1)) if next_ok else 0,
+                "has_cookies": doc["cookie_count"] > 0,
+                "proxy": bool(doc["proxy_url"]),
+                "last_used_at": doc["last_used_at"].isoformat() if doc["last_used_at"] else None,
+            }
+        )
     return out

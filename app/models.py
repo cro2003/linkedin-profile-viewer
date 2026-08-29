@@ -94,6 +94,7 @@ class SectionInfo(BaseModel):
     payload. They differ because the profile call returns only the first page of a
     collection, so a long skills list arrives truncated.
     """
+
     returned: int
     total: int | None = None
     complete: bool = True

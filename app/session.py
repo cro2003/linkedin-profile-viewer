@@ -15,9 +15,9 @@ import logging
 import time
 from pathlib import Path
 
+from app import accounts, logins, pool
 from app.config import Account, settings
 from app.db import redis
-from app import accounts, logins, pool
 
 log = logging.getLogger(__name__)
 
@@ -29,17 +29,21 @@ LOGGED_OUT_MARKERS = ("/login", "/authwall", "/uas/login", "/checkpoint")
 # «Rsvvriejj35659j6», and ships two copies of the form on the page. Input *types*
 # are stable, so match on those, keep the older id/name variants as fallbacks, and
 # take the visible copy.
-USER_SELECTOR = ("#username:visible, input[name='session_key']:visible, "
-                 "input[type='email']:visible")
-PASS_SELECTOR = ("#password:visible, input[name='session_password']:visible, "
-                 "input[type='password']:visible")
+USER_SELECTOR = "#username:visible, input[name='session_key']:visible, input[type='email']:visible"
+PASS_SELECTOR = (
+    "#password:visible, input[name='session_password']:visible, input[type='password']:visible"
+)
 SUBMIT_SELECTOR = "button[type='submit']:visible"
 # the verification-code field is as unstably named as the login inputs
-OTP_SELECTOR = ("input[name='pin']:visible, input[type='tel']:visible, "
-                "input[autocomplete='one-time-code']:visible, input[type='text']:visible")
+OTP_SELECTOR = (
+    "input[name='pin']:visible, input[type='tel']:visible, "
+    "input[autocomplete='one-time-code']:visible, input[type='text']:visible"
+)
 
-UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36")
+UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+)
 
 REFRESH_LOCK_TTL = 180
 
@@ -50,6 +54,7 @@ class SessionRefreshFailed(Exception):
 
 class LoginCheckpointRequired(SessionRefreshFailed):
     """LinkedIn demanded human verification. Retrying cannot help."""
+
     pass
 
 
@@ -85,11 +90,11 @@ async def _harvest(account: Account) -> dict[str, str]:
             if _logged_out(page.url):
                 if not (account.email and account.password):
                     raise SessionRefreshFailed(
-                        f"{account.id}: browser profile is logged out and no credentials configured")
+                        f"{account.id}: browser profile is logged out and no credentials configured"
+                    )
                 log.warning("%s falling back to credential login", account.id)
                 await page.goto(LOGIN_URL, wait_until="domcontentloaded")
-                log.info("%s login page: url=%s title=%r", account.id, page.url,
-                         await page.title())
+                log.info("%s login page: url=%s title=%r", account.id, page.url, await page.title())
                 user_field = page.locator(USER_SELECTOR).first
                 try:
                     await user_field.wait_for(timeout=15_000)
@@ -98,12 +103,14 @@ async def _harvest(account: Account) -> dict[str, str]:
                     # from logs alone instead of needing a live reproduction
                     inputs = await page.evaluate(
                         "() => [...document.querySelectorAll('input')]"
-                        ".map(i => i.type + ':' + (i.id || i.name || '?'))")
+                        ".map(i => i.type + ':' + (i.id || i.name || '?'))"
+                    )
                     log.error("%s inputs on page: %s", account.id, inputs)
                     raise SessionRefreshFailed(
                         f"{account.id}: no sign-in form at {page.url} "
                         f"(title={await page.title()!r}, inputs={inputs}); likely a bot "
-                        f"check or an unrecognised login variant") from e
+                        f"check or an unrecognised login variant"
+                    ) from e
                 await user_field.fill(account.email)
                 password_field = page.locator(PASS_SELECTOR).first
                 await password_field.fill(account.password)
@@ -113,17 +120,21 @@ async def _harvest(account: Account) -> dict[str, str]:
                 # settle on either a signed-in page or a challenge, whichever comes
                 try:
                     await page.wait_for_url(
-                        lambda u: not _logged_out(u) or "checkpoint" in u, timeout=45_000)
+                        lambda u: not _logged_out(u) or "checkpoint" in u, timeout=45_000
+                    )
                 except Exception as e:
                     raise SessionRefreshFailed(
-                        f"{account.id}: login did not complete, still at {page.url}") from e
+                        f"{account.id}: login did not complete, still at {page.url}"
+                    ) from e
 
             if "checkpoint" in page.url or "challenge" in page.url:
                 raise LoginCheckpointRequired(
-                    f"{account.id}: LinkedIn requires human verification at {page.url}")
+                    f"{account.id}: LinkedIn requires human verification at {page.url}"
+                )
 
-            cookies = {c["name"]: c["value"]
-                       for c in await context.cookies("https://www.linkedin.com")}
+            cookies = {
+                c["name"]: c["value"] for c in await context.cookies("https://www.linkedin.com")
+            }
             if not cookies.get("li_at") or not cookies.get("JSESSIONID"):
                 raise SessionRefreshFailed(f"{account.id}: harvested jar is missing core cookies")
             return cookies
@@ -150,8 +161,9 @@ async def refresh(account: Account) -> dict[str, str]:
 
     try:
         await pool.set_status(account.id, pool.REFRESHING)
-        cookies = await asyncio.wait_for(_harvest(account),
-                                         timeout=settings.cookie_refresh_timeout_sec)
+        cookies = await asyncio.wait_for(
+            _harvest(account), timeout=settings.cookie_refresh_timeout_sec
+        )
         await accounts.set_cookies(account.id, cookies)
         await pool.set_status(account.id, pool.LIVE)
         log.info("refreshed cookies for %s", account.id)
@@ -194,8 +206,9 @@ async def _submit_otp(page, code: str) -> None:
         await page.wait_for_load_state("domcontentloaded", timeout=30_000)
 
 
-async def login_and_harvest(account_id: str, email: str, password: str,
-                            proxy_url: str | None, login_id: str) -> dict[str, str]:
+async def login_and_harvest(
+    account_id: str, email: str, password: str, proxy_url: str | None, login_id: str
+) -> dict[str, str]:
     """Sign an account in, relaying a verification code from the admin panel.
 
     The browser context stays open for the whole attempt, which is why this runs
@@ -222,8 +235,9 @@ async def login_and_harvest(account_id: str, email: str, password: str,
 
             await page.goto(FEED_URL, wait_until="domcontentloaded")
             if _logged_out(page.url):
-                await logins.set_status(login_id, logins.RUNNING,
-                                        account_id=account_id, step="submitting credentials")
+                await logins.set_status(
+                    login_id, logins.RUNNING, account_id=account_id, step="submitting credentials"
+                )
                 await _submit_login(page, email, password)
 
             deadline = time.time() + settings.otp_wait_sec
@@ -236,30 +250,39 @@ async def login_and_harvest(account_id: str, email: str, password: str,
                 if "checkpoint" in url or "challenge" in url:
                     if not announced:
                         log.info("%s awaiting verification code", account_id)
-                        await logins.set_status(login_id, logins.AWAITING_OTP,
-                                                account_id=account_id,
-                                                step="verification code required")
+                        await logins.set_status(
+                            login_id,
+                            logins.AWAITING_OTP,
+                            account_id=account_id,
+                            step="verification code required",
+                        )
                         announced = True
                     code = await logins.take_otp(login_id)
                     if code:
-                        await logins.set_status(login_id, logins.RUNNING,
-                                                account_id=account_id, step="submitting code")
+                        await logins.set_status(
+                            login_id, logins.RUNNING, account_id=account_id, step="submitting code"
+                        )
                         announced = False
                         try:
                             await _submit_otp(page, code)
                         except Exception as e:
-                            await logins.set_status(login_id, logins.AWAITING_OTP,
-                                                    account_id=account_id,
-                                                    step=f"code rejected: {type(e).__name__}")
+                            await logins.set_status(
+                                login_id,
+                                logins.AWAITING_OTP,
+                                account_id=account_id,
+                                step=f"code rejected: {type(e).__name__}",
+                            )
                             announced = True
                 await asyncio.sleep(2)
             else:
                 raise SessionRefreshFailed(
                     f"{account_id}: login not completed within {settings.otp_wait_sec}s "
-                    f"(last url {page.url})")
+                    f"(last url {page.url})"
+                )
 
-            cookies = {c["name"]: c["value"]
-                       for c in await context.cookies("https://www.linkedin.com")}
+            cookies = {
+                c["name"]: c["value"] for c in await context.cookies("https://www.linkedin.com")
+            }
             missing = [c for c in ("li_at", "JSESSIONID") if not cookies.get(c)]
             if missing:
                 raise SessionRefreshFailed(f"{account_id}: harvested jar missing {missing}")

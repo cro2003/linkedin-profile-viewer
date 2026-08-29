@@ -25,9 +25,10 @@ def _payloads():
             continue
         # only full-profile payloads; the vanity->urn resolver returns a
         # Profile entity carrying nothing but an urn
-        if any(e.get("$type", "").endswith("identity.profile.Profile")
-               and e.get("publicIdentifier")
-               for e in payload.get("included", [])):
+        if any(
+            e.get("$type", "").endswith("identity.profile.Profile") and e.get("publicIdentifier")
+            for e in payload.get("included", [])
+        ):
             out.append(pytest.param(payload, id=f.stem[:40]))
     return out
 
@@ -39,7 +40,7 @@ needs_fixtures = pytest.mark.skipif(not PAYLOADS, reason="no captured fixtures a
 @needs_fixtures
 @pytest.mark.parametrize("payload", PAYLOADS)
 def test_parses_core_fields(payload):
-    profile, sections, partial = parse_profile(payload)
+    profile, _sections, partial = parse_profile(payload)
     assert partial == [], f"sections failed to parse: {partial}"
     assert profile.public_id
     assert profile.url.endswith(profile.public_id)
@@ -62,7 +63,7 @@ def test_section_metadata_reports_truncation(payload):
 @needs_fixtures
 @pytest.mark.parametrize("payload", PAYLOADS)
 def test_sections_are_well_formed(payload):
-    profile, sections, _ = parse_profile(payload)
+    profile, _sections, _ = parse_profile(payload)
     for job in profile.experience:
         assert job.title or job.company
         if job.is_current:
@@ -73,9 +74,14 @@ def test_sections_are_well_formed(payload):
     flags = [j.is_current for j in profile.experience]
     assert flags == sorted(flags, reverse=True)
     for current in (True, False):
-        years = [j.date_range.start.year for j in profile.experience
-                 if j.is_current is current
-                 and j.date_range and j.date_range.start and j.date_range.start.year]
+        years = [
+            j.date_range.start.year
+            for j in profile.experience
+            if j.is_current is current
+            and j.date_range
+            and j.date_range.start
+            and j.date_range.start.year
+        ]
         assert years == sorted(years, reverse=True)
 
 

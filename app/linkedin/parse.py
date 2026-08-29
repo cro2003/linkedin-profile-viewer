@@ -105,17 +105,19 @@ def _experience(payload: dict, index: dict) -> list[Experience]:
         # roles grouped under one employer can carry the name only on the group
         name = pos.get("companyName") or (groups.get(company_urn) or {}).get("companyName")
         date_range = _date_range(pos.get("dateRange"))
-        out.append(Experience(
-            title=pos.get("title"),
-            company=name or company.get("name"),
-            company_url=company.get("url"),
-            company_logo=_best_image(company.get("logo")),
-            location=pos.get("locationName"),
-            description=pos.get("description"),
-            employment_type=pos.get("employmentType"),
-            date_range=date_range,
-            is_current=bool(date_range and date_range.start and not date_range.end),
-        ))
+        out.append(
+            Experience(
+                title=pos.get("title"),
+                company=name or company.get("name"),
+                company_url=company.get("url"),
+                company_logo=_best_image(company.get("logo")),
+                location=pos.get("locationName"),
+                description=pos.get("description"),
+                employment_type=pos.get("employmentType"),
+                date_range=date_range,
+                is_current=bool(date_range and date_range.start and not date_range.end),
+            )
+        )
     return sorted(out, key=_sort_key, reverse=True)
 
 
@@ -123,42 +125,55 @@ def _education(payload: dict, index: dict) -> list[Education]:
     out = []
     for ed in _of_type(payload, "profile.Education"):
         school = index.get(ed.get("schoolUrn") or ed.get("*school")) or {}
-        out.append(Education(
-            school=ed.get("schoolName") or school.get("name"),
-            school_url=school.get("url"),
-            school_logo=_best_image(school.get("logo")),
-            degree=ed.get("degreeName"),
-            field_of_study=ed.get("fieldOfStudy"),
-            grade=ed.get("grade"),
-            activities=ed.get("activities"),
-            description=ed.get("description"),
-            date_range=_date_range(ed.get("dateRange")),
-        ))
+        out.append(
+            Education(
+                school=ed.get("schoolName") or school.get("name"),
+                school_url=school.get("url"),
+                school_logo=_best_image(school.get("logo")),
+                degree=ed.get("degreeName"),
+                field_of_study=ed.get("fieldOfStudy"),
+                grade=ed.get("grade"),
+                activities=ed.get("activities"),
+                description=ed.get("description"),
+                date_range=_date_range(ed.get("dateRange")),
+            )
+        )
     return sorted(out, key=_sort_key, reverse=True)
 
 
 def _skills(index: dict, profile: dict) -> list[Skill]:
-    return [Skill(name=s["name"], endorsement_count=s.get("endorsementCount"))
-            for s in _collection(index, profile.get("*profileSkills")) if s.get("name")]
+    return [
+        Skill(name=s["name"], endorsement_count=s.get("endorsementCount"))
+        for s in _collection(index, profile.get("*profileSkills"))
+        if s.get("name")
+    ]
 
 
 def _certifications(index: dict, profile: dict) -> list[Certification]:
-    return [Certification(
-        name=c["name"],
-        authority=c.get("authority"),
-        license_number=c.get("licenseNumber"),
-        url=c.get("url"),
-        date_range=_date_range(c.get("dateRange")),
-    ) for c in _collection(index, profile.get("*profileCertifications")) if c.get("name")]
+    return [
+        Certification(
+            name=c["name"],
+            authority=c.get("authority"),
+            license_number=c.get("licenseNumber"),
+            url=c.get("url"),
+            date_range=_date_range(c.get("dateRange")),
+        )
+        for c in _collection(index, profile.get("*profileCertifications"))
+        if c.get("name")
+    ]
 
 
 def _languages(index: dict, profile: dict) -> list[Language]:
-    return [Language(name=lang["name"], proficiency=lang.get("proficiency"))
-            for lang in _collection(index, profile.get("*profileLanguages")) if lang.get("name")]
+    return [
+        Language(name=lang["name"], proficiency=lang.get("proficiency"))
+        for lang in _collection(index, profile.get("*profileLanguages"))
+        if lang.get("name")
+    ]
 
 
-def parse_profile(payload: dict, public_id: str | None = None
-                  ) -> tuple[Profile, dict[str, SectionInfo], list[str]]:
+def parse_profile(
+    payload: dict, public_id: str | None = None
+) -> tuple[Profile, dict[str, SectionInfo], list[str]]:
     """Returns (profile, section_info, partial_sections).
 
     A section that blows up is reported as partial rather than failing the whole
@@ -174,7 +189,9 @@ def parse_profile(payload: dict, public_id: str | None = None
     if not pid:
         raise ProfileNotInPayload("payload has no publicIdentifier")
 
-    geo_urn = (prof.get("geoLocation") or {}).get("geoUrn") or (prof.get("geoLocation") or {}).get("*geo")
+    geo_urn = (prof.get("geoLocation") or {}).get("geoUrn") or (prof.get("geoLocation") or {}).get(
+        "*geo"
+    )
     geo = index.get(geo_urn) or {}
     industry = index.get(prof.get("industryUrn") or "") or {}
     first, last = prof.get("firstName"), prof.get("lastName")
@@ -225,4 +242,5 @@ def parse_profile(payload: dict, public_id: str | None = None
             # only the first page of a collection comes back with the profile
             complete=(total is None or returned >= total),
         )
+
     return profile, sections, partial

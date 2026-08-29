@@ -33,7 +33,9 @@ EDITABLE: dict[str, type] = {
 def _coerce(name: str, value):
     kind = EDITABLE[name]
     if kind is bool:
-        return value if isinstance(value, bool) else str(value).lower() in ("1", "true", "yes", "on")
+        return (
+            value if isinstance(value, bool) else str(value).lower() in ("1", "true", "yes", "on")
+        )
     coerced = kind(value)
     if coerced < 0:
         raise ValueError(f"{name} cannot be negative")
@@ -54,10 +56,14 @@ async def set_overrides(values: dict) -> dict:
 
     if "account_min_delay_sec" in clean or "account_max_delay_sec" in clean:
         current = await get_overrides()
-        low = clean.get("account_min_delay_sec", current.get(
-            "account_min_delay_sec", settings.account_min_delay_sec))
-        high = clean.get("account_max_delay_sec", current.get(
-            "account_max_delay_sec", settings.account_max_delay_sec))
+        low = clean.get(
+            "account_min_delay_sec",
+            current.get("account_min_delay_sec", settings.account_min_delay_sec),
+        )
+        high = clean.get(
+            "account_max_delay_sec",
+            current.get("account_max_delay_sec", settings.account_max_delay_sec),
+        )
         if low > high:
             raise ValueError("account_min_delay_sec cannot exceed account_max_delay_sec")
 

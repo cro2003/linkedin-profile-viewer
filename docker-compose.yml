@@ -10,6 +10,8 @@ services:
     restart: unless-stopped
 
   worker:
+    # exactly one replica: an OTP login keeps a browser open inside a single job,
+    # and the admin panel must reach that same process to hand over the code
     build:
       context: .
       dockerfile: Dockerfile.worker

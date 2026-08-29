@@ -17,9 +17,13 @@ class Credentials(BaseModel):
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
-    response.set_cookie(settings.session_cookie_name, token,
-                        max_age=settings.session_ttl_days * 86400,
-                        secure=settings.cookie_secure, **COOKIE_KWARGS)
+    response.set_cookie(
+        settings.session_cookie_name,
+        token,
+        max_age=settings.session_ttl_days * 86400,
+        secure=settings.cookie_secure,
+        **COOKIE_KWARGS,
+    )
 
 
 def _user_view(user: dict) -> dict:
@@ -38,8 +42,11 @@ async def signup(body: Credentials, response: Response):
     """Creates the account and returns the API key — the only time it is shown."""
     user, api_key = await auth.create_user(body.email, body.password)
     _set_session_cookie(response, await auth.start_session(user["_id"]))
-    return {"user": _user_view(user), "api_key": api_key,
-            "notice": "store this key now, it is not shown again"}
+    return {
+        "user": _user_view(user),
+        "api_key": api_key,
+        "notice": "store this key now, it is not shown again",
+    }
 
 
 @router.post("/auth/login")
@@ -68,8 +75,12 @@ async def me(caller: auth.Caller = Depends(auth.require_user)):
 @router.post("/me/api-key")
 async def rotate_api_key(caller: auth.Caller = Depends(auth.require_user)):
     if caller.kind == "env_key":
-        return {"error": {"code": "not_applicable",
-                          "message": "environment keys are not rotatable here"}}
+        return {
+            "error": {
+                "code": "not_applicable",
+                "message": "environment keys are not rotatable here",
+            }
+        }
     key = await auth.regenerate_api_key(caller.user["_id"])
     return {"api_key": key, "notice": "store this key now, it is not shown again"}
 
@@ -78,11 +89,16 @@ async def rotate_api_key(caller: auth.Caller = Depends(auth.require_user)):
 async def quota(request: Request, caller: auth.Caller = Depends(auth.resolve_caller)):
     """Drives the 'N free lookups left' banner."""
     if caller.is_authenticated:
-        return {"authenticated": True, "limit_per_min": settings.rate_limit_write_per_min,
-                "lookups_used": (caller.user or {}).get("lookups_used", 0)}
+        return {
+            "authenticated": True,
+            "limit_per_min": settings.rate_limit_write_per_min,
+            "lookups_used": (caller.user or {}).get("lookups_used", 0),
+        }
     anon_id = getattr(request.state, "anon_id", "unknown")
     used_browser, _ = await auth.anon_usage(anon_id, auth.client_ip(request))
-    return {"authenticated": False,
-            "free_total": settings.anon_free_lookups,
-            "free_used": min(used_browser, settings.anon_free_lookups),
-            "free_remaining": max(0, settings.anon_free_lookups - used_browser)}
+    return {
+        "authenticated": False,
+        "free_total": settings.anon_free_lookups,
+        "free_used": min(used_browser, settings.anon_free_lookups),
+        "free_remaining": max(0, settings.anon_free_lookups - used_browser),
+    }

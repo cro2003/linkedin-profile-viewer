@@ -12,9 +12,11 @@ class FakeCollection:
 
     async def update_one(self, query, update, upsert=False):
         self.updates.append((query, update, upsert))
+
         class Result:
             matched_count = 1
             deleted_count = 1
+
         return Result()
 
 
@@ -36,8 +38,10 @@ async def test_jar_missing_csrf_is_refused(fake_collection):
 
 
 async def test_complete_jar_is_stored(fake_collection):
-    assert await accounts.set_cookies(
-        "acct1", {"li_at": "a", "JSESSIONID": "ajax:b", "lidc": "c"}) is True
+    assert (
+        await accounts.set_cookies("acct1", {"li_at": "a", "JSESSIONID": "ajax:b", "lidc": "c"})
+        is True
+    )
     assert len(fake_collection.updates) == 1
 
 

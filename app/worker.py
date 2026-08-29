@@ -11,6 +11,7 @@ Retry policy follows the failure taxonomy established during reverse engineering
 import asyncio
 import json
 import logging
+from typing import ClassVar
 
 from arq import Retry
 from arq.connections import RedisSettings
@@ -107,18 +108,18 @@ async def fetch_profile_job(ctx: dict, public_id: str, force_refresh: bool = Fal
         # not retryable by definition; surface it so an operator can act
         await metrics.incr("checkpoints")
         await metrics.incr("failures")
-        await publish(job_id, "failed",
-                      error={"code": "account_needs_login", "message": str(e)})
+        await publish(job_id, "failed", error={"code": "account_needs_login", "message": str(e)})
         return {"public_id": public_id, "error": "account_needs_login"}
 
     except (TransientError, session.SessionRefreshFailed) as e:
         if attempt >= MAX_TRIES:
-            await publish(job_id, "failed",
-                          error={"code": "upstream_unavailable", "message": str(e)})
+            await publish(
+                job_id, "failed", error={"code": "upstream_unavailable", "message": str(e)}
+            )
             return {"public_id": public_id, "error": "upstream_unavailable"}
         await metrics.incr("retries")
         await publish(job_id, "retrying", error={"message": str(e)}, attempts=attempt)
-        raise Retry(defer=min(60, 2 ** attempt * 5))
+        raise Retry(defer=min(60, 2**attempt * 5)) from e
 
     except FetchError as e:
         await publish(job_id, "failed", error={"code": "fetch_failed", "message": str(e)})
@@ -128,39 +129,55 @@ async def fetch_profile_job(ctx: dict, public_id: str, force_refresh: bool = Fal
         # never leave a job stuck mid-status: an unhandled error still has to be
         # visible to whoever is polling or streaming it
         log.exception("unexpected failure on %s", public_id)
-        await publish(job_id, "failed",
-                      error={"code": "internal_error", "message": f"{type(e).__name__}: {e}"})
+        await publish(
+            job_id,
+            "failed",
+            error={"code": "internal_error", "message": f"{type(e).__name__}: {e}"},
+        )
         return {"public_id": public_id, "error": "internal_error"}
 
     finally:
         await pool.release(account.id, cookies=cookies_to_persist)
 
 
-async def add_account_job(ctx: dict, login_id: str, account_id: str, email: str,
-                          password: str, proxy_url: str | None = None,
-                          note: str | None = None) -> dict:
+async def add_account_job(
+    ctx: dict,
+    login_id: str,
+    account_id: str,
+    email: str,
+    password: str,
+    proxy_url: str | None = None,
+    note: str | None = None,
+) -> dict:
     """Sign in and store the harvested jar. The password is used here and never
     persisted; only cookies are kept."""
     try:
-        cookies = await session.login_and_harvest(account_id, email, password,
-                                                  proxy_url, login_id)
-        await accounts.create(account_id, cookies, proxy_url=proxy_url, email=email,
-                              note=note or "added via admin login")
+        cookies = await session.login_and_harvest(account_id, email, password, proxy_url, login_id)
+        await accounts.create(
+            account_id,
+            cookies,
+            proxy_url=proxy_url,
+            email=email,
+            note=note or "added via admin login",
+        )
         await pool.set_status(account_id, pool.LIVE)
-        await logins.set_status(login_id, logins.DONE, account_id=account_id,
-                                cookie_count=len(cookies))
+        await logins.set_status(
+            login_id, logins.DONE, account_id=account_id, cookie_count=len(cookies)
+        )
         log.info("account %s added with %d cookies", account_id, len(cookies))
         return {"account_id": account_id, "status": "done"}
     except Exception as e:
         log.error("adding account %s failed: %s", account_id, e)
-        await logins.set_status(login_id, logins.FAILED, account_id=account_id,
-                                message=str(e)[:300])
+        await logins.set_status(
+            login_id, logins.FAILED, account_id=account_id, message=str(e)[:300]
+        )
         return {"account_id": account_id, "status": "failed"}
 
 
 async def startup(ctx: dict) -> None:
-    logging.basicConfig(level=settings.log_level,
-                        format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    logging.basicConfig(
+        level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s %(message)s"
+    )
     await accounts.seed_from_env()
     await accounts.ensure_indexes()
     await store.ensure_indexes()
@@ -169,7 +186,7 @@ async def startup(ctx: dict) -> None:
 
 
 class WorkerSettings:
-    functions = [fetch_profile_job, add_account_job]
+    functions: ClassVar[list] = [fetch_profile_job, add_account_job]
     on_startup = startup
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
     # one more than our own guard, so the job's terminal state is always published

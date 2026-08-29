@@ -37,8 +37,7 @@ def test_forwarded_header_ignored_when_not_behind_proxy(monkeypatch):
 
 def test_forwarded_header_used_when_behind_proxy(monkeypatch):
     monkeypatch.setattr(settings, "trust_proxy_headers", True)
-    request = FakeRequest(host="10.0.0.1",
-                          headers={"x-forwarded-for": "1.2.3.4, 10.0.0.1"})
+    request = FakeRequest(host="10.0.0.1", headers={"x-forwarded-for": "1.2.3.4, 10.0.0.1"})
     assert client_identity(request, None) == "ip:1.2.3.4"
 
 

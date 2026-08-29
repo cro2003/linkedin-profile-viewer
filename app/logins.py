@@ -28,8 +28,7 @@ def _otp_key(login_id: str) -> str:
 
 
 async def set_status(login_id: str, status: str, **fields) -> None:
-    await redis.set(_status_key(login_id),
-                    json.dumps({"status": status, **fields}), ex=TTL)
+    await redis.set(_status_key(login_id), json.dumps({"status": status, **fields}), ex=TTL)
 
 
 async def get_status(login_id: str) -> dict | None:

@@ -3,7 +3,7 @@ import logging
 import secrets
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from arq import create_pool
 from arq.connections import RedisSettings
@@ -11,16 +11,16 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from app import (accounts, api_admin, api_auth, auth, metrics, pool, ratelimit,
-                 runtime, store, web)
+from app import accounts, api_admin, api_auth, auth, metrics, pool, ratelimit, runtime, store, web
 from app.config import settings
 from app.db import mongo, redis
 from app.models import Meta, Profile, ProfileResponse
 from app.urls import InvalidProfileURL, public_id_from_url
-from app.worker import fetch_profile_job, job_id_for
+from app.worker import job_id_for
 
-logging.basicConfig(level=settings.log_level,
-                    format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logging.basicConfig(
+    level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s %(message)s"
+)
 log = logging.getLogger(__name__)
 
 TERMINAL = ("done", "failed")
@@ -58,14 +58,21 @@ async def anonymous_identity(request: Request, call_next):
     request.state.anon_id = existing or secrets.token_urlsafe(16)
     response = await call_next(request)
     if not existing:
-        response.set_cookie(settings.anon_cookie_name, request.state.anon_id,
-                            max_age=90 * 86400, httponly=True, samesite="lax", path="/",
-                            secure=settings.cookie_secure)
+        response.set_cookie(
+            settings.anon_cookie_name,
+            request.state.anon_id,
+            max_age=90 * 86400,
+            httponly=True,
+            samesite="lax",
+            path="/",
+            secure=settings.cookie_secure,
+        )
     return response
 
 
-def error_response(status: int, code: str, message: str, retryable: bool = False,
-                   retry_after: int | None = None):
+def error_response(
+    status: int, code: str, message: str, retryable: bool = False, retry_after: int | None = None
+):
     body = {"code": code, "message": message, "retryable": retryable}
     if retry_after:
         body["retry_after"] = retry_after
@@ -74,12 +81,19 @@ def error_response(status: int, code: str, message: str, retryable: bool = False
 
 @app.exception_handler(HTTPException)
 async def http_error(request, exc: HTTPException):
-    detail = exc.detail if isinstance(exc.detail, dict) else {"code": "error",
-                                                              "message": str(exc.detail)}
+    detail = (
+        exc.detail
+        if isinstance(exc.detail, dict)
+        else {"code": "error", "message": str(exc.detail)}
+    )
     retry_after = detail.get("retry_after")
-    response = error_response(exc.status_code, detail.get("code", "error"),
-                              detail.get("message", ""), detail.get("retryable", False),
-                              retry_after)
+    response = error_response(
+        exc.status_code,
+        detail.get("code", "error"),
+        detail.get("message", ""),
+        detail.get("retryable", False),
+        retry_after,
+    )
     if retry_after:
         response.headers["Retry-After"] = str(retry_after)
     return response
@@ -107,7 +121,7 @@ class ProfileRequest(BaseModel):
 
 
 def _utc(value: datetime) -> datetime:
-    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
 def _response_from_doc(doc: dict, cache_hit: bool) -> ProfileResponse:
@@ -132,21 +146,22 @@ def _job_view(doc: dict) -> dict:
         "error": doc.get("error"),
         "created_at": _utc(doc["created_at"]).isoformat(),
         "updated_at": _utc(doc["updated_at"]).isoformat(),
-        "events": [{"status": e["status"], "at": _utc(e["at"]).isoformat()}
-                   for e in doc.get("events", [])],
-        "result_url": (f"/v1/profiles/{doc['public_id']}"
-                       if doc["status"] == "done" else None),
+        "events": [
+            {"status": e["status"], "at": _utc(e["at"]).isoformat()} for e in doc.get("events", [])
+        ],
+        "result_url": (f"/v1/profiles/{doc['public_id']}" if doc["status"] == "done" else None),
     }
 
 
 @app.post("/v1/profiles", dependencies=[Depends(limit_writes)])
-async def create_profile_request(body: ProfileRequest, request: Request,
-                                 caller: auth.Caller = Depends(auth.resolve_caller)):
+async def create_profile_request(
+    body: ProfileRequest, request: Request, caller: auth.Caller = Depends(auth.resolve_caller)
+):
     """Cache hit returns the profile directly; a miss queues a job and returns 202."""
     try:
         public_id = public_id_from_url(body.url)
     except InvalidProfileURL as e:
-        raise HTTPException(422, {"code": "invalid_url", "message": str(e)})
+        raise HTTPException(422, {"code": "invalid_url", "message": str(e)}) from e
 
     await metrics.incr("requests")
 
@@ -175,18 +190,26 @@ async def create_profile_request(body: ProfileRequest, request: Request,
             return _response_from_doc(cached, cache_hit=True).model_dump(mode="json")
 
     if not settings.linkedin_accounts:
-        raise HTTPException(503, {"code": "no_accounts",
-                                  "message": "no LinkedIn accounts configured"})
+        raise HTTPException(
+            503, {"code": "no_accounts", "message": "no LinkedIn accounts configured"}
+        )
     if not request.app.state.arq:
-        raise HTTPException(503, {"code": "queue_unavailable",
-                                  "message": "job queue is not reachable", "retryable": True})
+        raise HTTPException(
+            503,
+            {
+                "code": "queue_unavailable",
+                "message": "job queue is not reachable",
+                "retryable": True,
+            },
+        )
 
     job_id = job_id_for(public_id)
     # Enqueue first. A None return means arq already knows this job id, so a fetch
     # is in flight (or just finished) and duplicate requests share it — but we must
     # then report that job's real state rather than claiming a fresh "queued".
     enqueued = await request.app.state.arq.enqueue_job(
-        "fetch_profile_job", public_id, body.refresh, _job_id=job_id)
+        "fetch_profile_job", public_id, body.refresh, _job_id=job_id
+    )
 
     if enqueued is None:
         existing = await store.get_job(job_id)
@@ -197,13 +220,16 @@ async def create_profile_request(body: ProfileRequest, request: Request,
         status = "queued"
 
     await charge()
-    return JSONResponse(status_code=202, content={
-        "job_id": job_id,
-        "public_id": public_id,
-        "status": status,
-        "poll_url": f"/v1/jobs/{job_id}",
-        "events_url": f"/v1/jobs/{job_id}/events",
-    })
+    return JSONResponse(
+        status_code=202,
+        content={
+            "job_id": job_id,
+            "public_id": public_id,
+            "status": status,
+            "poll_url": f"/v1/jobs/{job_id}",
+            "events_url": f"/v1/jobs/{job_id}/events",
+        },
+    )
 
 
 @app.get("/v1/jobs/{job_id:path}/events", dependencies=[Depends(limit_reads)])
@@ -219,12 +245,11 @@ async def stream_job_events(job_id: str, request: Request):
         raise HTTPException(404, {"code": "job_not_found", "message": f"no job {job_id}"})
 
     async def stream():
-        seen = 0
         replay = await store.get_job(job_id)
         for event in (replay or {}).get("events", []):
-            seen += 1
-            yield _sse({"status": event["status"], "at": _utc(event["at"]).isoformat(),
-                        "replay": True})
+            yield _sse(
+                {"status": event["status"], "at": _utc(event["at"]).isoformat(), "replay": True}
+            )
         if replay and replay["status"] in TERMINAL:
             yield _sse({"status": replay["status"], "final": True})
             return
@@ -254,11 +279,15 @@ async def stream_job_events(job_id: str, request: Request):
             await pubsub.unsubscribe(f"job:{job_id}")
             await pubsub.close()
 
-    return StreamingResponse(stream(), media_type="text/event-stream", headers={
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-        "X-Accel-Buffering": "no",  # stops proxies buffering the stream
-    })
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # stops proxies buffering the stream
+        },
+    )
 
 
 @app.get("/v1/jobs/{job_id:path}", dependencies=[Depends(limit_reads)])
@@ -269,14 +298,17 @@ async def read_job(job_id: str):
     return _job_view(doc)
 
 
-@app.get("/v1/profiles/{public_id}", response_model=ProfileResponse,
-         dependencies=[Depends(limit_reads)])
-async def read_cached_profile(public_id: str,
-                              allow_stale: bool = Query(True, description="serve past TTL")):
+@app.get(
+    "/v1/profiles/{public_id}", response_model=ProfileResponse, dependencies=[Depends(limit_reads)]
+)
+async def read_cached_profile(
+    public_id: str, allow_stale: bool = Query(True, description="serve past TTL")
+):
     doc = await store.get_any(public_id) if allow_stale else await store.get_cached(public_id)
     if not doc or not doc.get("profile"):
-        raise HTTPException(404, {"code": "not_cached",
-                                  "message": f"no cached profile for {public_id}"})
+        raise HTTPException(
+            404, {"code": "not_cached", "message": f"no cached profile for {public_id}"}
+        )
     return _response_from_doc(doc, cache_hit=True)
 
 
