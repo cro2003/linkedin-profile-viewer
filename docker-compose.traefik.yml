@@ -6,6 +6,9 @@ services:
     ports: !reset []
     environment:
       COOKIE_SECURE: "true"
+      # uvicorn only honours X-Forwarded-Proto from a trusted source, and defaults to
+      # 127.0.0.1; without this every generated URL comes out as http
+      FORWARDED_ALLOW_IPS: "${FORWARDED_ALLOW_IPS:-172.16.0.0/12}"
       # Safe ONLY behind Traefik, which sets X-Forwarded-For itself: without a
       # trusted proxy, callers could forge it and reset their free quota at will.
       TRUST_PROXY_HEADERS: "true"
