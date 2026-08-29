@@ -86,3 +86,36 @@ def test_sections_are_well_formed(payload):
 def test_empty_payload_is_rejected():
     with pytest.raises(ProfileNotInPayload):
         parse_profile({"included": []})
+
+
+def test_parses_the_queried_profile_when_included_holds_others():
+    """`included` also carries related people, so the parser must follow
+    `data.*elements` rather than picking whatever Profile entity comes first."""
+    payload = {
+        "data": {"*elements": ["urn:li:fsd_profile:WANTED"]},
+        "included": [
+            {
+                "entityUrn": "urn:li:fsd_profile:BYSTANDER",
+                "$type": "com.linkedin.voyager.dash.identity.profile.Profile",
+                "publicIdentifier": "bystander-user-4d5e6f",
+                "firstName": "Bystander",
+                "lastName": "User",
+            },
+            {
+                "entityUrn": "urn:li:fsd_profile:WANTED",
+                "$type": "com.linkedin.voyager.dash.identity.profile.Profile",
+                "publicIdentifier": "queried-user-1a2b3c",
+                "firstName": "Queried",
+                "lastName": "User",
+            },
+        ],
+    }
+    profile, _sections, partial = parse_profile(payload)
+    assert profile.public_id == "queried-user-1a2b3c"
+    assert profile.full_name == "Queried User"
+    assert partial == []
+
+
+def test_missing_elements_is_rejected():
+    with pytest.raises(ProfileNotInPayload):
+        parse_profile({"data": {"*elements": []}, "included": []})
