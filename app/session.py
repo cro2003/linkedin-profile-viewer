@@ -16,7 +16,7 @@ from pathlib import Path
 
 from app.config import Account, settings
 from app.db import redis
-from app import pool
+from app import accounts, pool
 
 log = logging.getLogger(__name__)
 
@@ -140,14 +140,15 @@ async def refresh(account: Account) -> dict[str, str]:
         for _ in range(int(settings.cookie_refresh_timeout_sec)):
             await asyncio.sleep(1)
             if not await redis.exists(lock_key):
-                return await pool.get_cookies(account.id)
+                stored = await accounts.get_account(account.id)
+                return stored.cookies if stored else {}
         raise SessionRefreshFailed(f"{account.id}: timed out waiting on another refresh")
 
     try:
         await pool.set_status(account.id, pool.REFRESHING)
         cookies = await asyncio.wait_for(_harvest(account),
                                          timeout=settings.cookie_refresh_timeout_sec)
-        await pool.set_cookies(account.id, cookies)
+        await accounts.set_cookies(account.id, cookies)
         await pool.set_status(account.id, pool.LIVE)
         log.info("refreshed cookies for %s", account.id)
         return cookies

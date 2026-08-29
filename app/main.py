@@ -11,7 +11,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from app import metrics, pool, ratelimit, store
+from app import accounts, metrics, pool, ratelimit, store
 from app.config import settings
 from app.db import mongo, redis
 from app.models import Meta, Profile, ProfileResponse
@@ -30,7 +30,8 @@ async def lifespan(app: FastAPI):
     app.state.arq = None
     try:
         app.state.arq = await create_pool(RedisSettings.from_dsn(settings.redis_url))
-        await pool.seed_from_env()
+        await accounts.seed_from_env()
+        await accounts.ensure_indexes()
         await store.ensure_indexes()
     except Exception as e:  # boot even with cold dependencies; /health reports it
         log.warning("startup partially failed: %s", e)

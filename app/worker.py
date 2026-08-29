@@ -15,7 +15,7 @@ import logging
 from arq import Retry
 from arq.connections import RedisSettings
 
-from app import metrics, pool, session, store
+from app import accounts, metrics, pool, session, store
 from app.config import settings
 from app.db import redis
 from app.linkedin.client import (
@@ -137,9 +137,10 @@ async def fetch_profile_job(ctx: dict, public_id: str, force_refresh: bool = Fal
 async def startup(ctx: dict) -> None:
     logging.basicConfig(level=settings.log_level,
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    await pool.seed_from_env()
+    await accounts.seed_from_env()
+    await accounts.ensure_indexes()
     await store.ensure_indexes()
-    log.info("worker ready with %d account(s)", len(settings.linkedin_accounts))
+    log.info("worker ready with %d usable account(s)", len(await accounts.list_accounts()))
 
 
 class WorkerSettings:
