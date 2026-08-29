@@ -87,14 +87,25 @@ class Profile(BaseModel):
     languages: list[Language] = Field(default_factory=list)
 
 
+class SectionInfo(BaseModel):
+    """How complete a section is.
+
+    `total` is what LinkedIn reports it holds; `returned` is what came back in this
+    payload. They differ because the profile call returns only the first page of a
+    collection, so a long skills list arrives truncated.
+    """
+    returned: int
+    total: int | None = None
+    complete: bool = True
+
+
 class Meta(BaseModel):
     fetched_at: datetime
     cache_hit: bool = False
     source: str = "api"
     schema_version: str = SCHEMA_VERSION
-    # sections the upstream payload did not resolve, so the client can tell
-    # "this person has no certifications" from "we could not read them"
-    unavailable_sections: list[str] = Field(default_factory=list)
+    sections: dict[str, SectionInfo] = Field(default_factory=dict)
+    # sections whose parsing raised, as opposed to sections that are simply empty
     partial_sections: list[str] = Field(default_factory=list)
 
 

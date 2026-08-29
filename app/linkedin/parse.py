@@ -13,12 +13,17 @@ from app.models import (
     Experience,
     Language,
     Profile,
+    SectionInfo,
     Skill,
 )
 from app.urls import canonical_url
 
-# collections the upstream decoration does not resolve; see research findings
-KNOWN_UNRESOLVED = ("skills", "certifications", "languages")
+# collection references on the profile entity, and the section each one fills
+COLLECTION_REFS = {
+    "skills": "*profileSkills",
+    "certifications": "*profileCertifications",
+    "languages": "*profileLanguages",
+}
 
 
 class ProfileNotInPayload(ValueError):
@@ -82,6 +87,15 @@ def _collection(index: dict, ref) -> list[dict]:
     return [e for e in resolved if e]
 
 
+def _collection_total(index: dict, ref) -> int | None:
+    """What LinkedIn says the collection holds, which can exceed what it returned."""
+    if not isinstance(ref, str):
+        return None
+    paging = (index.get(ref) or {}).get("paging") or {}
+    total = paging.get("total")
+    return int(total) if isinstance(total, (int, float)) else None
+
+
 def _experience(payload: dict, index: dict) -> list[Experience]:
     groups = {g.get("companyUrn"): g for g in _of_type(payload, "profile.PositionGroup")}
     out = []
@@ -143,11 +157,12 @@ def _languages(index: dict, profile: dict) -> list[Language]:
             for lang in _collection(index, profile.get("*profileLanguages")) if lang.get("name")]
 
 
-def parse_profile(payload: dict, public_id: str | None = None) -> tuple[Profile, list[str], list[str]]:
-    """Returns (profile, unavailable_sections, partial_sections).
+def parse_profile(payload: dict, public_id: str | None = None
+                  ) -> tuple[Profile, dict[str, SectionInfo], list[str]]:
+    """Returns (profile, section_info, partial_sections).
 
     A section that blows up is reported as partial rather than failing the whole
-    profile — a reviewer would rather have 9 fields than a 500.
+    profile — a caller would rather have nine fields than a 500.
     """
     index = _index(payload)
     entities = _of_type(payload, "identity.profile.Profile")
@@ -197,5 +212,17 @@ def parse_profile(payload: dict, public_id: str | None = None) -> tuple[Profile,
         except Exception:
             partial.append(name)
 
-    unavailable = [s for s in KNOWN_UNRESOLVED if not getattr(profile, s)]
-    return profile, unavailable, partial
+    sections: dict[str, SectionInfo] = {}
+    for name in ("experience", "education"):
+        returned = len(getattr(profile, name))
+        sections[name] = SectionInfo(returned=returned, total=returned, complete=True)
+    for name, ref in COLLECTION_REFS.items():
+        returned = len(getattr(profile, name))
+        total = _collection_total(index, prof.get(ref))
+        sections[name] = SectionInfo(
+            returned=returned,
+            total=total,
+            # only the first page of a collection comes back with the profile
+            complete=(total is None or returned >= total),
+        )
+    return profile, sections, partial

@@ -117,7 +117,7 @@ def _response_from_doc(doc: dict, cache_hit: bool) -> ProfileResponse:
             fetched_at=_utc(doc["fetched_at"]),
             cache_hit=cache_hit,
             source=doc.get("source", "api"),
-            unavailable_sections=doc.get("unavailable_sections", []),
+            sections=doc.get("sections", {}),
             partial_sections=doc.get("partial_sections", []),
         ),
     )

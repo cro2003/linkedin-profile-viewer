@@ -47,7 +47,7 @@ async def get_any(public_id: str) -> dict | None:
     return await profiles.find_one({"_id": public_id})
 
 
-async def save_profile(profile: Profile, raw: dict, unavailable: list[str],
+async def save_profile(profile: Profile, raw: dict, sections: dict,
                        partial: list[str], account_id: str) -> dict:
     doc = {
         "_id": profile.public_id,
@@ -56,7 +56,8 @@ async def save_profile(profile: Profile, raw: dict, unavailable: list[str],
         "fetched_at": _now(),
         "source": "api",
         "schema_version": SCHEMA_VERSION,
-        "unavailable_sections": unavailable,
+        "sections": {k: (v.model_dump() if hasattr(v, "model_dump") else v)
+                     for k, v in sections.items()},
         "partial_sections": partial,
         "account_id": account_id,
         "error": None,

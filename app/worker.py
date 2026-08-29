@@ -90,8 +90,8 @@ async def fetch_profile_job(ctx: dict, public_id: str, force_refresh: bool = Fal
                 cookies_to_persist = client.cookies
 
         await publish(job_id, "parsing")
-        profile, unavailable, partial = parse_profile(payload, public_id)
-        await store.save_profile(profile, payload, unavailable, partial, account.id)
+        profile, sections, partial = parse_profile(payload, public_id)
+        await store.save_profile(profile, payload, sections, partial, account.id)
         await metrics.incr("fetches")
         await publish(job_id, "done", cache_hit=False, account_id=account.id)
         return {"public_id": public_id, "cache_hit": False}

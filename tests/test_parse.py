@@ -39,7 +39,7 @@ needs_fixtures = pytest.mark.skipif(not PAYLOADS, reason="no captured fixtures a
 @needs_fixtures
 @pytest.mark.parametrize("payload", PAYLOADS)
 def test_parses_core_fields(payload):
-    profile, unavailable, partial = parse_profile(payload)
+    profile, sections, partial = parse_profile(payload)
     assert partial == [], f"sections failed to parse: {partial}"
     assert profile.public_id
     assert profile.url.endswith(profile.public_id)
@@ -48,8 +48,21 @@ def test_parses_core_fields(payload):
 
 @needs_fixtures
 @pytest.mark.parametrize("payload", PAYLOADS)
+def test_section_metadata_reports_truncation(payload):
+    """A collection returns only its first page, so `complete` must reflect that
+    rather than silently handing back a partial list."""
+    _, sections, _ = parse_profile(payload)
+    for name in ("skills", "certifications", "languages"):
+        info = sections[name]
+        assert info.returned >= 0
+        if info.total is not None:
+            assert info.complete == (info.returned >= info.total)
+
+
+@needs_fixtures
+@pytest.mark.parametrize("payload", PAYLOADS)
 def test_sections_are_well_formed(payload):
-    profile, _, _ = parse_profile(payload)
+    profile, sections, _ = parse_profile(payload)
     for job in profile.experience:
         assert job.title or job.company
         if job.is_current:

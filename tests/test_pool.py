@@ -30,6 +30,12 @@ class FakeRedis:
 def fake_redis(monkeypatch):
     fake = FakeRedis()
     monkeypatch.setattr(pool, "redis", fake)
+
+    async def noop(*args, **kwargs):
+        return None
+    # release() records last-used in Mongo; these tests must not touch a database
+    monkeypatch.setattr(accounts, "touch", noop)
+    monkeypatch.setattr(accounts, "set_cookies", noop)
     return fake
 
 

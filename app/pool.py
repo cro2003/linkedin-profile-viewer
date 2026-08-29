@@ -68,6 +68,7 @@ async def release(account_id: str, *, cookies: dict[str, str] | None = None) -> 
     """Free the account and start its cooldown. Persist a rotated jar if given."""
     if cookies:
         await accounts.set_cookies(account_id, cookies)
+    await accounts.touch(account_id)
     delay = random.uniform(settings.account_min_delay_sec, settings.account_max_delay_sec)
     await redis.set(_k(account_id, "next_ok_at"), str(time.time() + delay))
     await redis.delete(_k(account_id, "lock"))
