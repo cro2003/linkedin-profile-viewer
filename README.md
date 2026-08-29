@@ -17,6 +17,12 @@ A profile API built by reverse engineering the JSON endpoints LinkedIn's own web
 ![Tests](https://img.shields.io/badge/tests-88_passing-brightgreen?logo=pytest&logoColor=white)
 ![License](https://img.shields.io/badge/license-source--available-orange)
 
+![Looking up a profile end to end](assets/demo.gif)
+
+*A cold lookup, nothing cached: URL in, job queued, live progress streaming over SSE, then the
+parsed profile. The footnotes underneath are the API being honest about what LinkedIn withheld
+for this particular profile.*
+
 I deliberately did not build this as a headless-browser scraper. Going after the JSON API
 directly means a lookup takes about a second instead of ten, returns already-structured data,
 and doesn't need 2 GB of Chromium sitting in the worker image.
@@ -533,6 +539,11 @@ One shape everywhere:
 
 Jinja templates, Tailwind from CDN, vanilla `EventSource`. No build step and no node
 toolchain, which for five pages was the right trade.
+
+![Admin panel](assets/admin.png)
+
+*Accounts tab: live status, cooldown, whether a jar is present, and whether the account egresses
+through a proxy. Adding an account is a paste, not a password.*
 
 ## Security
 
