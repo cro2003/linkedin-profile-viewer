@@ -20,3 +20,4 @@ research/
 fixtures/raw/
 .playwright-mcp/
 research/cookies.json
+.env.prod

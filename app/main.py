@@ -189,9 +189,17 @@ async def create_profile_request(
             await charge()
             return _response_from_doc(cached, cache_hit=True).model_dump(mode="json")
 
-    if not settings.linkedin_accounts:
+    # accounts live in Mongo and are added through /admin, so the environment is
+    # only ever a first-boot seed — checking it here reported "no accounts" on any
+    # deployment whose accounts were added through the panel
+    if not await accounts.list_accounts():
         raise HTTPException(
-            503, {"code": "no_accounts", "message": "no LinkedIn accounts configured"}
+            503,
+            {
+                "code": "no_accounts",
+                "message": "no LinkedIn accounts configured; add one in /admin",
+                "retryable": False,
+            },
         )
     if not request.app.state.arq:
         raise HTTPException(
