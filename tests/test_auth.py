@@ -29,11 +29,11 @@ def test_password_is_not_recoverable_from_hash():
 
 def test_api_key_hashing():
     key, key_hash, prefix = auth.new_api_key()
-    assert key.startswith("lpg_")
+    assert key.startswith("sc_")
     assert prefix == key[:12]
     assert auth.hash_api_key(key) == key_hash
     assert key not in key_hash, "stored hash must not contain the key"
-    assert auth.hash_api_key("lpg_other") != key_hash
+    assert auth.hash_api_key("sc_other") != key_hash
 
 
 @pytest.mark.parametrize("email", ["nope", "no@domain", "@example.com", "", "a b@c.com"])

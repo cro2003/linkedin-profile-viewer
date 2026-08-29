@@ -15,10 +15,10 @@ services:
     labels:
       - traefik.enable=true
       - traefik.docker.network=proxy
-      - traefik.http.routers.lpg.rule=Host(`${LPG_DOMAIN}`)
-      - traefik.http.routers.lpg.entrypoints=websecure
-      - traefik.http.routers.lpg.tls.certresolver=le
-      - traefik.http.services.lpg.loadbalancer.server.port=8000
+      - traefik.http.routers.sourcely.rule=Host(`${SOURCELY_DOMAIN}`)
+      - traefik.http.routers.sourcely.entrypoints=websecure
+      - traefik.http.routers.sourcely.tls.certresolver=le
+      - traefik.http.services.sourcely.loadbalancer.server.port=8000
     networks:
       - default
       - proxy

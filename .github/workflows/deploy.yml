@@ -33,12 +33,12 @@ jobs:
             git fetch origin
             git reset --hard origin/main
 
-            # APP_ENV holds the application settings; LPG_DOMAIN is appended because
-            # compose reads this same file for ${LPG_DOMAIN} substitution
+            # APP_ENV holds the application settings; SOURCELY_DOMAIN is appended
+            # because compose reads this same file for ${SOURCELY_DOMAIN} substitution
             cat > .env <<'__APP_ENV__'
             ${{ secrets.APP_ENV }}
             __APP_ENV__
-            echo "LPG_DOMAIN=${{ secrets.LPG_DOMAIN }}" >> .env
+            echo "SOURCELY_DOMAIN=${{ secrets.SOURCELY_DOMAIN }}" >> .env
             chmod 600 .env
 
             docker network create proxy 2>/dev/null || true

@@ -55,8 +55,8 @@ class Settings(BaseSettings):
     superadmin_email: str | None = None
     superadmin_password: str | None = None
     session_ttl_days: int = 7
-    session_cookie_name: str = "lpg_session"
-    anon_cookie_name: str = "lpg_anon"
+    session_cookie_name: str = "sourcely_session"
+    anon_cookie_name: str = "sourcely_anon"
     # free lookups before signup is required: per browser, and a looser per-IP cap so
     # clearing cookies does not reset the quota while shared NAT is not punished
     anon_free_lookups: int = 5

@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
         await app.state.arq.close()
 
 
-app = FastAPI(title="LinkedIn Profile API", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="Sourcely API", version="0.3.0", lifespan=lifespan)
 app.include_router(api_auth.router)
 app.include_router(api_admin.router)
 app.include_router(web.router)

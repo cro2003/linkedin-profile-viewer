@@ -1,22 +1,32 @@
 {% extends "base.html" %}
+{% block title %}Sourcely · professional profiles as an API{% endblock %}
 {% block content %}
 
-<div class="mb-8">
-  <h1 class="text-3xl font-semibold text-slate-100">LinkedIn profile lookup</h1>
-  <p class="mt-2 text-slate-400">Paste a profile URL and get structured JSON. Results are cached,
-     fetches are queued and throttled per account.</p>
-</div>
+<section class="pt-6 pb-10 text-center">
+  <div class="inline-flex items-center gap-2 rounded-full border border-slate-800 bg-slate-900/60
+              px-3 py-1 text-xs text-slate-400">
+    <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+    Live · cached, queued and throttled
+  </div>
+  <h1 class="mt-5 text-4xl sm:text-5xl font-semibold tracking-tight text-slate-50">
+    Professional profiles,<br class="hidden sm:block"> as a clean API.
+  </h1>
+  <p class="mt-4 max-w-xl mx-auto text-slate-400">
+    Give Sourcely a profile URL and get structured JSON back — name, headline, about,
+    location, experience, education, skills and certifications.
+  </p>
+</section>
 
-<div class="card rounded-xl p-5">
+<div class="card rounded-2xl p-5 shadow-2xl shadow-black/40">
   <form id="lookup" class="flex flex-col sm:flex-row gap-3">
     <input id="url" name="url" required
            placeholder="https://www.linkedin.com/in/williamhgates/"
-           class="field flex-1 rounded-lg px-4 py-2.5 text-slate-100 placeholder:text-slate-600">
-    <label class="flex items-center gap-2 text-sm text-slate-400 px-1">
+           class="field flex-1 rounded-xl px-4 py-3 text-slate-100 placeholder:text-slate-600">
+    <label class="flex items-center gap-2 text-sm text-slate-400 px-1 select-none">
       <input type="checkbox" id="refresh" class="rounded border-slate-600 bg-slate-900"> refresh
     </label>
-    <button id="go" class="rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50
-                           px-5 py-2.5 font-medium text-white">Look up</button>
+    <button id="go" class="rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50
+                           px-6 py-3 font-medium text-white transition">Look up</button>
   </form>
   <div id="quota" class="mt-3 text-xs text-slate-500"></div>
 </div>
@@ -27,8 +37,92 @@
 </div>
 
 <div id="error" class="hidden mt-4 rounded-xl border border-red-900/60 bg-red-950/40 p-4 text-sm"></div>
-
 <div id="result" class="hidden mt-4"></div>
+
+<section class="mt-16 grid gap-4 sm:grid-cols-3">
+  <div class="card rounded-xl p-5">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 text-blue-400"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
+    <h3 class="mt-2 font-medium text-slate-100">Cached by default</h3>
+    <p class="mt-1 text-sm text-slate-400">
+      Repeat lookups return in milliseconds and never touch upstream. Raw payloads are kept
+      so a parser fix can be replayed without re-fetching.
+    </p>
+  </div>
+  <div class="card rounded-xl p-5">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 text-blue-400"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h10"/><circle cx="19" cy="17" r="2"/></svg>
+    <h3 class="mt-2 font-medium text-slate-100">Queued and throttled</h3>
+    <p class="mt-1 text-sm text-slate-400">
+      One request in flight per source account, with jittered spacing between them.
+      Retries are classified, so a missing profile is never retried like an outage.
+    </p>
+  </div>
+  <div class="card rounded-xl p-5">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 text-blue-400"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
+    <h3 class="mt-2 font-medium text-slate-100">Live progress</h3>
+    <p class="mt-1 text-sm text-slate-400">
+      Long fetches stream their state over server-sent events, with polling available
+      for clients that cannot hold a connection open.
+    </p>
+  </div>
+</section>
+
+<section class="mt-12">
+  <h2 class="text-lg font-medium text-slate-100">How it works</h2>
+  <ol class="mt-4 grid gap-3 sm:grid-cols-4 text-sm">
+    <li class="card rounded-xl p-4">
+      <div class="text-xs text-slate-600">01</div>
+      <div class="mt-1 text-slate-200">Normalise</div>
+      <p class="mt-1 text-slate-500">Any spelling of a profile URL collapses to one canonical id.</p>
+    </li>
+    <li class="card rounded-xl p-4">
+      <div class="text-xs text-slate-600">02</div>
+      <div class="mt-1 text-slate-200">Serve or queue</div>
+      <p class="mt-1 text-slate-500">A cache hit answers immediately; a miss becomes a job.</p>
+    </li>
+    <li class="card rounded-xl p-4">
+      <div class="text-xs text-slate-600">03</div>
+      <div class="mt-1 text-slate-200">Fetch</div>
+      <p class="mt-1 text-slate-500">A worker leases an account, respects its cooldown, and fetches.</p>
+    </li>
+    <li class="card rounded-xl p-4">
+      <div class="text-xs text-slate-600">04</div>
+      <div class="mt-1 text-slate-200">Parse</div>
+      <p class="mt-1 text-slate-500">Entities are resolved into a flat, validated schema.</p>
+    </li>
+  </ol>
+</section>
+
+<section class="mt-12 card rounded-xl p-5">
+  <div class="flex items-baseline justify-between gap-4">
+    <h2 class="text-lg font-medium text-slate-100">Use it from code</h2>
+    <a href="/docs" class="text-sm text-blue-400 hover:text-blue-300">Full API reference →</a>
+  </div>
+  <div class="mt-4 grid gap-4 lg:grid-cols-2">
+    <div>
+      <div class="text-xs uppercase tracking-wide text-slate-500 mb-2">Request</div>
+      <pre class="overflow-x-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-400">curl -X POST {{ request.base_url }}v1/profiles \
+  -H "X-API-Key: sc_your_key" \
+  -H "content-type: application/json" \
+  -d '{"url":"linkedin.com/in/williamhgates"}'</pre>
+    </div>
+    <div>
+      <div class="text-xs uppercase tracking-wide text-slate-500 mb-2">Response</div>
+      <pre class="overflow-x-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-400">{
+  "data": {
+    "full_name": "Bill Gates",
+    "headline": "Chair, Gates Foundation…",
+    "location": "Seattle, Washington…",
+    "experience": [ … ],
+    "education":  [ … ]
+  },
+  "meta": { "cache_hit": true, "sections": { … } }
+}</pre>
+    </div>
+  </div>
+  <p class="mt-4 text-sm text-slate-400">
+    Five lookups are free without an account. Sign up for an API key and higher limits.
+  </p>
+</section>
 
 {% endblock %}
 {% block scripts %}
@@ -38,7 +132,7 @@ let stream = null;
 
 const STATUS_LABEL = {
   queued: 'Queued', waiting_for_account: 'Waiting for a free account',
-  fetching: 'Fetching from LinkedIn', refreshing_session: 'Refreshing session cookies',
+  fetching: 'Fetching profile', refreshing_session: 'Refreshing session cookies',
   parsing: 'Parsing profile', retrying: 'Upstream hiccup, retrying',
   done: 'Done', failed: 'Failed', stream_timeout: 'Stream timed out',
 };

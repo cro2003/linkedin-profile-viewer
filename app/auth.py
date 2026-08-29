@@ -56,7 +56,7 @@ def verify_password(password: str, password_hash: str, salt_hex: str) -> bool:
 
 def new_api_key() -> tuple[str, str, str]:
     """Returns (plaintext, hash, prefix). Only the hash and prefix are stored."""
-    key = f"lpg_{secrets.token_urlsafe(32)}"
+    key = f"sc_{secrets.token_urlsafe(32)}"
     return key, hash_api_key(key), key[:12]
 
 
