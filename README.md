@@ -19,9 +19,10 @@ A profile API built by reverse engineering the JSON endpoints LinkedIn's own web
 
 ![Looking up a profile end to end](assets/demo.gif)
 
-*A cold lookup, nothing cached: URL in, job queued, live progress streaming over SSE, then the
-parsed profile. The footnotes underneath are the API being honest about what LinkedIn withheld
-for this particular profile.*
+*A cold lookup with nothing cached, on my own profile: URL in, job queued, live progress
+streaming over SSE with the account that served it, then the parsed result — experience,
+education, skills and certifications. The footnote at the end is the API admitting it only got
+20 of the 40 skills, because LinkedIn hands back one page per collection.*
 
 I deliberately did not build this as a headless-browser scraper. Going after the JSON API
 directly means a lookup takes about a second instead of ten, returns already-structured data,
