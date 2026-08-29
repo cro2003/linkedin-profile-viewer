@@ -50,6 +50,19 @@ class Settings(BaseSettings):
     rate_limit_write_per_min: int = 10
     rate_limit_read_per_min: int = 60
     trust_proxy_headers: bool = False
+
+    # --- users / auth ---
+    superadmin_email: str | None = None
+    superadmin_password: str | None = None
+    session_ttl_days: int = 7
+    session_cookie_name: str = "lpg_session"
+    anon_cookie_name: str = "lpg_anon"
+    # free lookups before signup is required: per browser, and a looser per-IP cap so
+    # clearing cookies does not reset the quota while shared NAT is not punished
+    anon_free_lookups: int = 5
+    anon_ip_lookups: int = 15
+    # set true once served over HTTPS so cookies are not sent in the clear
+    cookie_secure: bool = False
     sse_max_duration_sec: int = 300
     browser_profile_dir: str = "/data/browser"
     browser_headless: bool = True

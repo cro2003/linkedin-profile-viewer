@@ -1,6 +1,6 @@
-import asyncio
 import json
 import logging
+import secrets
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -11,7 +11,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from app import accounts, metrics, pool, ratelimit, store
+from app import accounts, api_auth, auth, metrics, pool, ratelimit, store
 from app.config import settings
 from app.db import mongo, redis
 from app.models import Meta, Profile, ProfileResponse
@@ -32,6 +32,8 @@ async def lifespan(app: FastAPI):
         app.state.arq = await create_pool(RedisSettings.from_dsn(settings.redis_url))
         await accounts.seed_from_env()
         await accounts.ensure_indexes()
+        await auth.ensure_indexes()
+        await auth.bootstrap_superadmin()
         await store.ensure_indexes()
     except Exception as e:  # boot even with cold dependencies; /health reports it
         log.warning("startup partially failed: %s", e)
@@ -40,7 +42,22 @@ async def lifespan(app: FastAPI):
         await app.state.arq.close()
 
 
-app = FastAPI(title="LinkedIn Profile API", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="LinkedIn Profile API", version="0.3.0", lifespan=lifespan)
+app.include_router(api_auth.router)
+
+
+@app.middleware("http")
+async def anonymous_identity(request: Request, call_next):
+    """Give every unauthenticated browser a stable id, so the free-lookup quota is
+    not merely per-IP. Resolved before the route runs so the first request counts."""
+    existing = request.cookies.get(settings.anon_cookie_name)
+    request.state.anon_id = existing or secrets.token_urlsafe(16)
+    response = await call_next(request)
+    if not existing:
+        response.set_cookie(settings.anon_cookie_name, request.state.anon_id,
+                            max_age=90 * 86400, httponly=True, samesite="lax", path="/",
+                            secure=settings.cookie_secure)
+    return response
 
 
 def error_response(status: int, code: str, message: str, retryable: bool = False,
@@ -72,14 +89,12 @@ async def require_api_key(x_api_key: str | None = Header(default=None)):
         raise HTTPException(401, {"code": "unauthorized", "message": "valid X-API-Key required"})
 
 
-async def limit_writes(request: Request, x_api_key: str | None = Header(default=None)):
-    identity = ratelimit.client_identity(request, x_api_key)
-    await ratelimit.check(identity, "write", settings.rate_limit_write_per_min, 60)
+async def limit_writes(caller: auth.Caller = Depends(auth.resolve_caller)):
+    await ratelimit.check(caller.identity, "write", settings.rate_limit_write_per_min, 60)
 
 
-async def limit_reads(request: Request, x_api_key: str | None = Header(default=None)):
-    identity = ratelimit.client_identity(request, x_api_key)
-    await ratelimit.check(identity, "read", settings.rate_limit_read_per_min, 60)
+async def limit_reads(caller: auth.Caller = Depends(auth.resolve_caller)):
+    await ratelimit.check(caller.identity, "read", settings.rate_limit_read_per_min, 60)
 
 
 class ProfileRequest(BaseModel):
@@ -120,9 +135,9 @@ def _job_view(doc: dict) -> dict:
     }
 
 
-@app.post("/v1/profiles",
-          dependencies=[Depends(require_api_key), Depends(limit_writes)])
-async def create_profile_request(body: ProfileRequest, request: Request):
+@app.post("/v1/profiles", dependencies=[Depends(limit_writes)])
+async def create_profile_request(body: ProfileRequest, request: Request,
+                                 caller: auth.Caller = Depends(auth.resolve_caller)):
     """Cache hit returns the profile directly; a miss queues a job and returns 202."""
     try:
         public_id = public_id_from_url(body.url)
@@ -130,6 +145,19 @@ async def create_profile_request(body: ProfileRequest, request: Request):
         raise HTTPException(422, {"code": "invalid_url", "message": str(e)})
 
     await metrics.incr("requests")
+
+    anon_id = getattr(request.state, "anon_id", "unknown")
+    ip = auth.client_ip(request)
+    if not caller.is_authenticated:
+        await auth.check_anon_quota(anon_id, ip)
+
+    async def charge():
+        """A lookup is a lookup whether or not the cache served it."""
+        if caller.is_authenticated:
+            if caller.user:
+                await auth.record_user_lookup(caller.user["_id"])
+        else:
+            await auth.consume_anon_quota(anon_id, ip)
 
     if not body.refresh:
         cached = await store.get_cached(public_id)
@@ -139,6 +167,7 @@ async def create_profile_request(body: ProfileRequest, request: Request):
             raise HTTPException(404, {"code": err["code"], "message": err["message"]})
         if cached:
             await metrics.incr("cache_hits")
+            await charge()
             return _response_from_doc(cached, cache_hit=True).model_dump(mode="json")
 
     if not settings.linkedin_accounts:
@@ -163,6 +192,7 @@ async def create_profile_request(body: ProfileRequest, request: Request):
         await metrics.incr("jobs_queued")
         status = "queued"
 
+    await charge()
     return JSONResponse(status_code=202, content={
         "job_id": job_id,
         "public_id": public_id,
@@ -172,8 +202,7 @@ async def create_profile_request(body: ProfileRequest, request: Request):
     })
 
 
-@app.get("/v1/jobs/{job_id:path}/events",
-         dependencies=[Depends(require_api_key), Depends(limit_reads)])
+@app.get("/v1/jobs/{job_id:path}/events", dependencies=[Depends(limit_reads)])
 async def stream_job_events(job_id: str, request: Request):
     """Server-sent events for one job.
 
@@ -228,8 +257,7 @@ async def stream_job_events(job_id: str, request: Request):
     })
 
 
-@app.get("/v1/jobs/{job_id:path}",
-         dependencies=[Depends(require_api_key), Depends(limit_reads)])
+@app.get("/v1/jobs/{job_id:path}", dependencies=[Depends(limit_reads)])
 async def read_job(job_id: str):
     doc = await store.get_job(job_id)
     if not doc:
@@ -238,7 +266,7 @@ async def read_job(job_id: str):
 
 
 @app.get("/v1/profiles/{public_id}", response_model=ProfileResponse,
-         dependencies=[Depends(require_api_key), Depends(limit_reads)])
+         dependencies=[Depends(limit_reads)])
 async def read_cached_profile(public_id: str,
                               allow_stale: bool = Query(True, description="serve past TTL")):
     doc = await store.get_any(public_id) if allow_stale else await store.get_cached(public_id)
@@ -252,7 +280,7 @@ def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
 
-@app.get("/v1/stats", dependencies=[Depends(require_api_key)])
+@app.get("/v1/stats", dependencies=[Depends(auth.require_superadmin)])
 async def read_stats():
     return {"counters": await metrics.snapshot(), "accounts": await pool.snapshot()}
 
