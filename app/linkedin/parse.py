@@ -29,6 +29,23 @@ class ProfileNotInPayload(ValueError):
     pass
 
 
+def primary_profile(payload: dict) -> dict | None:
+    """The profile the query actually asked for.
+
+    `data.*elements` names the result; `included` additionally carries related people
+    the decoration pulls in ("people also viewed"), so taking the first Profile entity
+    there can return a complete stranger.
+    """
+    index = _index(payload)
+    data = payload.get("data") or {}
+    elements = data.get("*elements") or data.get("elements") or []
+    for ref in elements:
+        entity = index.get(ref) if isinstance(ref, str) else ref
+        if entity and entity.get("$type", "").endswith("identity.profile.Profile"):
+            return entity
+    return None
+
+
 def _index(payload: dict) -> dict:
     return {e["entityUrn"]: e for e in payload.get("included", []) if "entityUrn" in e}
 
@@ -179,10 +196,9 @@ def parse_profile(
     profile — a caller would rather have nine fields than a 500.
     """
     index = _index(payload)
-    entities = _of_type(payload, "identity.profile.Profile")
-    if not entities:
-        raise ProfileNotInPayload("no Profile entity in payload")
-    prof = entities[0]
+    prof = primary_profile(payload)
+    if prof is None:
+        raise ProfileNotInPayload("payload names no queried profile")
 
     pid = prof.get("publicIdentifier") or public_id
     if not pid:

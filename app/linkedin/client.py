@@ -14,6 +14,7 @@ import logging
 import httpx
 
 from app.config import Account, settings
+from app.linkedin.parse import primary_profile
 
 log = logging.getLogger(__name__)
 
@@ -193,16 +194,8 @@ class ProfileClient:
             # a 200 that is not JSON means we were handed a login/authwall page
             raise SessionExpired("200 but body is not JSON") from e
 
-        entity = next(
-            (
-                e
-                for e in payload.get("included", [])
-                if e.get("$type", "").endswith("identity.profile.Profile")
-                and e.get("publicIdentifier")
-            ),
-            None,
-        )
-        if entity is None:
+        entity = primary_profile(payload)
+        if entity is None or not entity.get("publicIdentifier"):
             raise PermanentError(f"no profile in payload for {public_id}")
 
         returned = entity["publicIdentifier"]
